@@ -8,7 +8,7 @@ from rl4co.utils.pylogger import get_pylogger
 log = get_pylogger(__name__)
 
 
-class FJSPGenerator(Generator):
+class FJSPTGenerator(Generator):
     """Data generator for the Flexible Job-Shop Scheduling Problem (FJSP).
 
     Args:
@@ -32,10 +32,13 @@ class FJSPGenerator(Generator):
         self,
         num_jobs: int = 10,
         num_machines: int = 5,
+        num_tracks: int = 3,
         min_ops_per_job: int = 4,
         max_ops_per_job: int = 6,
         min_processing_time: int = 1,
         max_processing_time: int = 20,
+        min_transportation_time: int = 0,
+        max_transportation_time: int = 15,
         min_eligible_ma_per_op: int = 1,
         max_eligible_ma_per_op: int = None,
         same_mean_per_op: bool = True,
@@ -43,10 +46,13 @@ class FJSPGenerator(Generator):
     ):
         self.num_jobs = num_jobs
         self.num_mas = num_machines
+        self.num_tracks = num_tracks
         self.min_ops_per_job = min_ops_per_job
         self.max_ops_per_job = max_ops_per_job
         self.min_processing_time = min_processing_time
         self.max_processing_time = max_processing_time
+        self.min_transportation_time = min_transportation_time
+        self.max_transportation_time = max_transportation_time
         self.min_eligible_ma_per_op = min_eligible_ma_per_op
         self.max_eligible_ma_per_op = max_eligible_ma_per_op or num_machines
         # determines whether to use a fixed number of total operations or let it vary between instances
@@ -104,6 +110,18 @@ class FJSPGenerator(Generator):
         proc_times = proc_times * ma_ops_edges
         return proc_times
 
+    def _simulate_tracks_times(self, batch_size) -> torch.Tensor:
+        tracks_times = torch.randint(
+            self.min_transportation_time,
+            self.max_transportation_time + 1,
+            size=(batch_size, self.num_mas + 1, self.num_mas + 1),
+            # Всего: LU + self.num_mas
+        )
+        # обнуление диагонали для батча матриц
+        mask = ~torch.eye(self.num_mas + 1, dtype=torch.bool, device=tracks_times.device)
+        tracks_times = tracks_times * mask
+        return tracks_times
+
     def _generate(self, batch_size) -> TensorDict:
         # simulate how many operations each job has
         n_ope_per_job = torch.randint(
@@ -145,12 +163,14 @@ class FJSPGenerator(Generator):
         # simulate processing times for machine-operation pairs
         # (bs, num_mas, n_ops_max)
         proc_times = self._simulate_processing_times(n_eligible_per_ops)
+        tracks_times = self._simulate_tracks_times(batch_size)
 
         td = TensorDict(
             {
                 "start_op_per_job": start_op_per_job,
                 "end_op_per_job": end_op_per_job,
                 "proc_times": proc_times,
+                "tracks_times": tracks_times,
                 "pad_mask": pad_mask,
             },
             batch_size=batch_size,
