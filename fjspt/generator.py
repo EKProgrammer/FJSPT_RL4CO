@@ -1,3 +1,6 @@
+from functools import partial
+
+import numpy as np
 import torch
 
 from tensordict.tensordict import TensorDict
@@ -5,34 +8,19 @@ from tensordict.tensordict import TensorDict
 from rl4co.envs.common.utils import Generator
 from rl4co.utils.pylogger import get_pylogger
 
+from .parser import get_max_ops_from_files, read, file2lines
+
 log = get_pylogger(__name__)
 
 
 class FJSPTGenerator(Generator):
-    """Data generator for the Flexible Job-Shop Scheduling Problem (FJSP).
-
-    Args:
-        num_stage: number of stages
-        num_machine: number of machines
-        num_job: number of jobs
-        min_time: minimum running time of each job on each machine
-        max_time: maximum running time of each job on each machine
-        flatten_stages: whether to flatten the stages
-
-    Returns:
-        A TensorDict with the following key:
-            start_op_per_job [batch_size, num_jobs]: first operation of each job
-            end_op_per_job [batch_size, num_jobs]: last operation of each job
-            proc_times [batch_size, num_machines, total_n_ops]: processing time of ops on machines
-            pad_mask [batch_size, total_n_ops]: not all instances have the same number of ops, so padding is used
-
-    """
+    """Data generator for the Flexible Job-Shop Scheduling Problem with Transportation resources (FJSPT)."""
 
     def __init__(
         self,
         num_jobs: int = 10,
         num_machines: int = 5,
-        num_tracks: int = 3,
+        num_trucks: int = 2,
         min_ops_per_job: int = 4,
         max_ops_per_job: int = 6,
         min_processing_time: int = 1,
@@ -46,7 +34,7 @@ class FJSPTGenerator(Generator):
     ):
         self.num_jobs = num_jobs
         self.num_mas = num_machines
-        self.num_tracks = num_tracks
+        self.num_trucks = num_trucks
         self.min_ops_per_job = min_ops_per_job
         self.max_ops_per_job = max_ops_per_job
         self.min_processing_time = min_processing_time
@@ -110,17 +98,17 @@ class FJSPTGenerator(Generator):
         proc_times = proc_times * ma_ops_edges
         return proc_times
 
-    def _simulate_tracks_times(self, batch_size) -> torch.Tensor:
-        tracks_times = torch.randint(
+    def _simulate_trucks_times(self, batch_size) -> torch.Tensor:
+        trucks_times = torch.randint(
             self.min_transportation_time,
             self.max_transportation_time + 1,
             size=(batch_size, self.num_mas + 1, self.num_mas + 1),
             # Всего: LU + self.num_mas
         )
         # обнуление диагонали для батча матриц
-        mask = ~torch.eye(self.num_mas + 1, dtype=torch.bool, device=tracks_times.device)
-        tracks_times = tracks_times * mask
-        return tracks_times
+        mask = ~torch.eye(self.num_mas + 1, dtype=torch.bool, device=trucks_times.device)
+        trucks_times = trucks_times * mask
+        return trucks_times
 
     def _generate(self, batch_size) -> TensorDict:
         # simulate how many operations each job has
@@ -163,17 +151,80 @@ class FJSPTGenerator(Generator):
         # simulate processing times for machine-operation pairs
         # (bs, num_mas, n_ops_max)
         proc_times = self._simulate_processing_times(n_eligible_per_ops)
-        tracks_times = self._simulate_tracks_times(batch_size)
+        trucks_times = self._simulate_trucks_times(batch_size)
 
         td = TensorDict(
             {
                 "start_op_per_job": start_op_per_job,
                 "end_op_per_job": end_op_per_job,
                 "proc_times": proc_times,
-                "tracks_times": tracks_times,
+                "trucks_times": trucks_times,
                 "pad_mask": pad_mask,
             },
             batch_size=batch_size,
         )
 
         return td
+
+
+class FJSPTFileGenerator(Generator):
+    """Data generator for the Flexible Job-Shop Scheduling Problem with Transportation resources (FJSPT)
+    using instance files"""
+
+    def __init__(self, file_path: str, transportation_file_path: str, n_ops_max: int = None, **unused_kwargs):
+        self.files = self.list_files(file_path)
+        self.num_samples = len(self.files)
+
+        if len(unused_kwargs) > 0:
+            log.error(f"Found {len(unused_kwargs)} unused kwargs: {unused_kwargs}")
+
+        if len(self.files) > 1:
+            n_ops_max = get_max_ops_from_files(self.files)
+
+        ret = map(partial(read, max_ops=n_ops_max), self.files)
+
+        td_list, num_jobs, num_machines, num_trucks, max_ops_per_job = list(zip(*list(ret)))
+        num_jobs, num_machines = map(lambda x: x[0], (num_jobs, num_machines))
+        max_ops_per_job = max(max_ops_per_job)
+
+        trucks_times = torch.tensor(file2lines(transportation_file_path))
+        assert trucks_times.ndim == 2 and trucks_times.size(0) == trucks_times.size(1)
+        # !!! есть датасеты с матрицей для большего числа станков - обрезаем матрицу
+        trucks_times = trucks_times[:num_machines + 1, :num_machines + 1]
+        td_list["trucks_times"] = [trucks_times for _ in range(self.num_samples)]
+
+        self.td = torch.cat(td_list, dim=0)
+        self.num_mas = num_machines
+        self.num_jobs = num_jobs
+        self.num_trucks = num_trucks
+        self.max_ops_per_job = max_ops_per_job
+        self.n_ops_max = max_ops_per_job * num_jobs
+
+        self.start_idx = 0
+
+    def _generate(self, batch_size: list[int]) -> TensorDict:
+        batch_size = np.prod(batch_size)
+        if batch_size > self.num_samples:
+            log.warning(
+                f"Only found {self.num_samples} instance files, but specified dataset size is {batch_size}"
+            )
+        end_idx = self.start_idx + batch_size
+        td = self.td[self.start_idx : end_idx]
+        self.start_idx += batch_size
+        if self.start_idx >= self.num_samples:
+            self.start_idx = 0
+        return td
+
+    @staticmethod
+    def list_files(path):
+        """
+        Функция находит в папку, игнорирует другие папки внутри неё, собирает пути
+        ко всем «настоящим» файлам и проверяет, чтобы список не оказался пустым.
+        """
+        import os
+
+        files = [
+            os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))
+        ]
+        assert len(files) > 0
+        return files

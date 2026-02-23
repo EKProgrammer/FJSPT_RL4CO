@@ -8,7 +8,7 @@ from rl4co.envs.common.base import RL4COEnvBase as EnvBase
 from rl4co.utils.ops import gather_by_index, sample_n_random_actions
 
 from . import INIT_FINISH, NO_OP_ID
-from .generator import FJSPTGenerator
+from .generator import FJSPTGenerator, FJSPTFileGenerator
 from .render import render
 from .utils import calc_lower_bound, get_job_ops_mapping, op_is_ready
 
@@ -27,12 +27,15 @@ class FJSPTEnv(EnvBase):
     ):
         super().__init__(check_solution=False, **kwargs)
         if generator is None:
-            # генерируем случайные инстансы
-            generator = FJSPTGenerator(**generator_params)
+            if generator_params.get("file_path", None) is not None:
+                generator = FJSPTFileGenerator(**generator_params)
+            else:
+                # генерируем случайные инстансы
+                generator = FJSPTGenerator(**generator_params)
         self.generator = generator
         self._num_mas = generator.num_mas
         self._num_jobs = generator.num_jobs
-        self._num_tracks = generator.num_tracks
+        self._num_trucks = generator.num_trucks
         self._n_ops_max = generator.max_ops_per_job * self.num_jobs
 
         self.mask_no_ops = mask_no_ops
@@ -48,8 +51,8 @@ class FJSPTEnv(EnvBase):
     def num_jobs(self):
         return self._num_jobs
 
-    def num_tracks(self):
-        return self._num_tracks
+    def num_trucks(self):
+        return self._num_trucks
 
     @property
     def n_ops_max(self):
@@ -123,27 +126,27 @@ class FJSPTEnv(EnvBase):
         start_op_per_job = td_reset["start_op_per_job"]
         machine_start_times = torch.zeros((*batch_size, n_ops_max))
         machine_finish_times = torch.full((*batch_size, n_ops_max), INIT_FINISH)
-        track_start_times = torch.zeros((*batch_size, self.num_tracks))
-        track_finish_times = torch.full((*batch_size, self.num_tracks), INIT_FINISH)
+        truck_start_times = torch.zeros((*batch_size, self.num_trucks))
+        truck_finish_times = torch.full((*batch_size, self.num_trucks), INIT_FINISH)
         ma_assignment = torch.zeros((*batch_size, self.num_mas, n_ops_max))
 
         # reset feature space
         machine_busy_until = torch.zeros((*batch_size, self.num_mas))
-        truck_busy_until = torch.zeros((*batch_size, self.num_tracks))
+        truck_busy_until = torch.zeros((*batch_size, self.num_trucks))
         # (bs, ma, ops)
         ops_ma_adj = (td_reset["proc_times"] > 0).to(torch.float32)
         # (bs, ops)
         num_eligible = torch.sum(ops_ma_adj, dim=1)
 
         td["job_location"][batch_idx, selected_job] = selected_machine
-        td["track_location"][batch_idx, selected_track] = selected_machine
+        td["truck_location"][batch_idx, selected_truck] = selected_machine
 
         td_reset = td_reset.update(
             {
                 "machine_start_times": machine_start_times,
                 "machine_finish_times": machine_finish_times,
-                "track_start_times": track_start_times,
-                "track_finish_times": track_finish_times,
+                "truck_start_times": truck_start_times,
+                "truck_finish_times": truck_finish_times,
                 "ma_assignment": ma_assignment,
                 "machine_busy_until": machine_busy_until,
                 "truck_busy_until": truck_busy_until,
@@ -157,7 +160,7 @@ class FJSPTEnv(EnvBase):
                 "job_done": torch.full((*batch_size, self.num_jobs), False),
                 "done": torch.full((*batch_size, 1), False),
                 # перевозит ли данный грузовик какую-то деталь
-                "track_in_process": torch.full((*batch_size, self.num_tracks), False),
+                "truck_in_process": torch.full((*batch_size, self.num_trucks), False),
             },
         )
 
@@ -219,16 +222,16 @@ class FJSPTEnv(EnvBase):
 
         # Размеры для деления
         n_m = self.num_mas
-        n_t = self.num_tracks
+        n_t = self.num_trucks
 
         # Извлекаем индексы (обратный порядок умножения)
         selected_machine = action % n_m
         remaining = action // n_m
-        selected_track = remaining % n_t
+        selected_truck = remaining % n_t
         selected_job = remaining // n_t
 
         selected_op = td["next_op"].gather(1, selected_job[:, None]).squeeze(1)
-        return selected_job, selected_op, selected_track, selected_machine
+        return selected_job, selected_op, selected_truck, selected_machine
 
     def _step(self, td: TensorDict):
         # cloning required to avoid inplace operation which avoids gradient backtracking
@@ -299,23 +302,23 @@ class FJSPTEnv(EnvBase):
         batch_idx = torch.arange(td.size(0))
 
         # 3*(#req_op)
-        selected_job, selected_op, selected_track, selected_machine = self._translate_action(td)
+        selected_job, selected_op, selected_truck, selected_machine = self._translate_action(td)
 
         # 1. Считаем время транспортировки
         # Откуда забираем деталь
         job_loc = td["job_location"][batch_idx, selected_job]
         # Где сейчас грузовик
-        track_loc = td["track_location"][batch_idx, selected_track]
+        truck_loc = td["truck_location"][batch_idx, selected_truck]
 
         # Время доехать пустым до детали + довезти деталь до станка
-        dist_empty = td["tracks_times"][batch_idx, track_loc, job_loc]
-        dist_loaded = td["tracks_times"][batch_idx, job_loc, selected_machine]
+        dist_empty = td["trucks_times"][batch_idx, truck_loc, job_loc]
+        dist_loaded = td["trucks_times"][batch_idx, job_loc, selected_machine]
 
         # Грузовик может начать движение только когда он свободен
         # Деталь можно забрать, когда она готова (закончена прошлая операция)
-        track_ready_to_pick = td["track_busy_until"][batch_idx, selected_track],
+        truck_ready_to_pick = td["truck_busy_until"][batch_idx, selected_truck],
 
-        arrival_at_job = track_ready_to_pick + dist_empty
+        arrival_at_job = truck_ready_to_pick + dist_empty
         arrival_at_machine = arrival_at_job + dist_loaded
 
         # 2. Считаем время обработки
@@ -340,9 +343,9 @@ class FJSPTEnv(EnvBase):
         td["machine_finish_times"][batch_idx, selected_op] = proc_end  # !!! selected_op
         td["ma_assignment"][batch_idx, selected_machine, selected_op] = 1
 
-        # td["track_start_times"][batch_idx, selected_track] =
-        # td["track_finish_times"][batch_idx, selected_track] =
-        # Нужны ли вообще machine_start_times, machine_finish_times, track_start_times, track_finish_times?
+        # td["truck_start_times"][batch_idx, selected_truck] =
+        # td["truck_finish_times"][batch_idx, selected_truck] =
+        # Нужны ли вообще machine_start_times, machine_finish_times, truck_start_times, truck_finish_times?
 
         # update the state of the selected machine
         td["machine_busy_until"][batch_idx, selected_machine] = arrival_at_machine  # !!! selected_machine
@@ -350,7 +353,7 @@ class FJSPTEnv(EnvBase):
 
         # Обновляем локации для следующих шагов
         td["job_location"][batch_idx, selected_job] = selected_machine
-        td["track_location"][batch_idx, selected_track] = selected_machine
+        td["truck_location"][batch_idx, selected_truck] = selected_machine
 
         # update adjacency matrices (remove edges)
         td["proc_times"] = td["proc_times"].scatter(
@@ -387,12 +390,12 @@ class FJSPTEnv(EnvBase):
         ma_free_time = torch.where(td["machine_busy_until"] > td["time"][:, None],
                                    td["machine_busy_until"], torch.inf)
         # Время освобождения грузовиков
-        track_free_time = torch.where(td["truck_busy_until"] > td["time"][:, None],
+        truck_free_time = torch.where(td["truck_busy_until"] > td["time"][:, None],
                                       td["truck_busy_until"], torch.inf)
         # Находим глобальный минимум
         min_ma = ma_free_time.min(1).values
-        min_track = track_free_time.min(1).values
-        available_time = torch.minimum(min_ma, min_track)
+        min_truck = truck_free_time.min(1).values
+        available_time = torch.minimum(min_ma, min_truck)
 
         assert not torch.any(available_time[step_complete].isinf())
         td["time"] = torch.where(step_complete, available_time, td["time"])
@@ -475,7 +478,7 @@ class FJSPTEnv(EnvBase):
                 dtype=torch.int64,
             ),
             truck_busy_until=Unbounded(
-                shape=(self.num_tracks,),
+                shape=(self.num_trucks,),
                 dtype=torch.int64,
             ),
             num_eligible=Unbounded(
@@ -494,16 +497,16 @@ class FJSPTEnv(EnvBase):
                 shape=(self.num_jobs,),
                 dtype=torch.bool,
             ),
-            track_in_process=Unbounded(
-                shape=(self.num_tracks,),
+            truck_in_process=Unbounded(
+                shape=(self.num_trucks,),
                 dtype=torch.bool,
             ),
-            track_start_times=Unbounded(
-                shape=(self.num_tracks,),
+            truck_start_times=Unbounded(
+                shape=(self.num_trucks,),
                 dtype=torch.bool,
             ),
-            track_finish_times=Unbounded(
-                shape=(self.num_tracks,),
+            truck_finish_times=Unbounded(
+                shape=(self.num_trucks,),
                 dtype=torch.bool,
             ),
             shape=(),
