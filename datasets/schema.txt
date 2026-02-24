@@ -1,6 +1,10 @@
+Формат FJSP
 [число задач] [число машин] [число транспорта]
-[кол-во операций] [кол-во машин для оп.1] [машина] [время] ...
+[кол-во операций для задачи 1] [кол-во машин для оп.1] [машина 1] [время 1] ... [машина n] [время n] [кол-во машин для оп.2] [машина 1] [время 1] ... [машина m] [время m] ....
+[кол-во операций для задачи 2] [кол-во машин для оп.1] [машина 1] [время 1] ... [машина n] [время n] [кол-во машин для оп.2] [машина 1] [время 1] ... [машина m] [время m] ....
+далее строка с задачей 3, затем 4 и т. д. ...
 
+Пример матрицы с транспортировочными временами
    LU M1 M2 M3 M4 M5 M6 M7 M8
 LU  0  6  8  6  8 10 12 10 12
 M1  8  0  2  8  2  4  6  4  6
@@ -11,3 +15,78 @@ M5  8  8  2  8  6  0  6  4  2
 M6  6 10  8  10 8  6  0  6  4
 M7 12  4  6  4  2  8 10  0 10
 M8 10  6  4  6  4  2  8  2  0
+
+----------
+
+5 8 2 ['1_Deroussi_and_Norre/proc_data/fjsp5.txt', '1_Deroussi_and_Norre/proc_data/fjsp9.txt', '1_Deroussi_and_Norre/proc_data/fjsp4.txt']
+6 8 2 ['1_Deroussi_and_Norre/proc_data/fjsp2.txt', '1_Deroussi_and_Norre/proc_data/fjsp8.txt', '1_Deroussi_and_Norre/proc_data/fjsp6.txt', '1_Deroussi_and_Norre/proc_data/fjsp10.txt', '1_Deroussi_and_Norre/proc_data/fjsp3.txt']
+7 8 2 ['1_Deroussi_and_Norre/proc_data/fjsp1.txt']
+8 8 2 ['1_Deroussi_and_Norre/proc_data/fjsp7.txt']
+
+8 1_Deroussi_and_Norre/trucks_data/trucks_layout8.txt
+
+----------
+
+6 6 2 ['2_Ham/edata/mt06.fjs', '2_Ham/rdata/mt06.fjs', '2_Ham/vdata/mt06.fjs', '2_Ham/sdata/mt06.fjs']
+7 7 2 ['2_Ham/edata/car7.fjs', '2_Ham/rdata/car7.fjs', '2_Ham/vdata/car7.fjs', '2_Ham/sdata/car7.fjs']
+8 8 2 ['2_Ham/edata/car8.fjs', '2_Ham/rdata/car8.fjs', '2_Ham/vdata/car8.fjs', '2_Ham/sdata/car8.fjs']
+8 9 2 ['2_Ham/edata/car6.fjs', '2_Ham/rdata/car6.fjs', '2_Ham/vdata/car6.fjs', '2_Ham/sdata/car6.fjs']
+10 5 2 ['2_Ham/edata/la01.fjs', '2_Ham/edata/la04.fjs', '2_Ham/edata/la03.fjs', '2_Ham/edata/la05.fjs', '2_Ham/edata/la02.fjs', '2_Ham/rdata/la01.fjs', '2_Ham/rdata/la04.fjs', '2_Ham/rdata/la03.fjs', '2_Ham/rdata/la05.fjs', '2_Ham/rdata/la02.fjs', '2_Ham/vdata/la01.fjs', '2_Ham/vdata/la04.fjs', '2_Ham/vdata/la03.fjs', '2_Ham/vdata/la05.fjs', '2_Ham/vdata/la02.fjs', '2_Ham/sdata/la01.fjs', '2_Ham/sdata/la04.fjs', '2_Ham/sdata/la03.fjs', '2_Ham/sdata/la05.fjs', '2_Ham/sdata/la02.fjs']
+10 6 2 ['2_Ham/edata/car5.fjs', '2_Ham/rdata/car5.fjs', '2_Ham/vdata/car5.fjs', '2_Ham/sdata/car5.fjs']
+10 10 2 ['2_Ham/edata/abz5.fjs', '2_Ham/edata/orb7.fjs', '2_Ham/edata/la16.fjs', '2_Ham/edata/orb3.fjs', '2_Ham/edata/orb5.fjs', '2_Ham/edata/la20.fjs', '2_Ham/edata/la19.fjs', '2_Ham/edata/orb9.fjs', '2_Ham/edata/orb10.fjs', '2_Ham/edata/orb2.fjs', '2_Ham/edata/la18.fjs', '2_Ham/edata/orb4.fjs', '2_Ham/edata/la17.fjs', '2_Ham/edata/orb1.fjs', '2_Ham/edata/orb6.fjs', '2_Ham/edata/abz6.fjs', '2_Ham/edata/mt10.fjs', '2_Ham/edata/orb8.fjs', '2_Ham/rdata/abz5.fjs', '2_Ham/rdata/orb7.fjs', '2_Ham/rdata/la16.fjs', '2_Ham/rdata/orb3.fjs', '2_Ham/rdata/orb5.fjs', '2_Ham/rdata/la20.fjs', '2_Ham/rdata/la19.fjs', '2_Ham/rdata/orb9.fjs', '2_Ham/rdata/orb10.fjs', '2_Ham/rdata/orb2.fjs', '2_Ham/rdata/la18.fjs', '2_Ham/rdata/orb4.fjs', '2_Ham/rdata/la17.fjs', '2_Ham/rdata/orb1.fjs', '2_Ham/rdata/orb6.fjs', '2_Ham/rdata/abz6.fjs', '2_Ham/rdata/mt10.fjs', '2_Ham/rdata/orb8.fjs', '2_Ham/vdata/abz5.fjs', '2_Ham/vdata/orb7.fjs', '2_Ham/vdata/la16.fjs', '2_Ham/vdata/orb3.fjs', '2_Ham/vdata/orb5.fjs', '2_Ham/vdata/la20.fjs', '2_Ham/vdata/la19.fjs', '2_Ham/vdata/orb9.fjs', '2_Ham/vdata/orb10.fjs', '2_Ham/vdata/orb2.fjs', '2_Ham/vdata/la18.fjs', '2_Ham/vdata/orb4.fjs', '2_Ham/vdata/la17.fjs', '2_Ham/vdata/orb1.fjs', '2_Ham/vdata/orb6.fjs', '2_Ham/vdata/abz6.fjs', '2_Ham/vdata/mt10.fjs', '2_Ham/vdata/orb8.fjs', '2_Ham/sdata/abz5.fjs', '2_Ham/sdata/orb7.fjs', '2_Ham/sdata/la16.fjs', '2_Ham/sdata/orb3.fjs', '2_Ham/sdata/orb5.fjs', '2_Ham/sdata/la20.fjs', '2_Ham/sdata/la19.fjs', '2_Ham/sdata/orb9.fjs', '2_Ham/sdata/orb10.fjs', '2_Ham/sdata/orb2.fjs', '2_Ham/sdata/la18.fjs', '2_Ham/sdata/orb4.fjs', '2_Ham/sdata/la17.fjs', '2_Ham/sdata/orb1.fjs', '2_Ham/sdata/orb6.fjs', '2_Ham/sdata/abz6.fjs', '2_Ham/sdata/mt10.fjs', '2_Ham/sdata/orb8.fjs']
+11 5 2 ['2_Ham/edata/car1.fjs', '2_Ham/rdata/car1.fjs', '2_Ham/vdata/car1.fjs', '2_Ham/sdata/car1.fjs']
+12 5 2 ['2_Ham/edata/car3.fjs', '2_Ham/rdata/car3.fjs', '2_Ham/vdata/car3.fjs', '2_Ham/sdata/car3.fjs']
+13 4 2 ['2_Ham/edata/car2.fjs', '2_Ham/rdata/car2.fjs', '2_Ham/vdata/car2.fjs', '2_Ham/sdata/car2.fjs']
+14 4 2 ['2_Ham/edata/car4.fjs', '2_Ham/rdata/car4.fjs', '2_Ham/vdata/car4.fjs', '2_Ham/sdata/car4.fjs']
+15 5 2 ['2_Ham/edata/la06.fjs', '2_Ham/edata/la09.fjs', '2_Ham/edata/la07.fjs', '2_Ham/edata/la08.fjs', '2_Ham/edata/la10.fjs', '2_Ham/rdata/la06.fjs', '2_Ham/rdata/la09.fjs', '2_Ham/rdata/la07.fjs', '2_Ham/rdata/la08.fjs', '2_Ham/rdata/la10.fjs', '2_Ham/vdata/la06.fjs', '2_Ham/vdata/la09.fjs', '2_Ham/vdata/la07.fjs', '2_Ham/vdata/la08.fjs', '2_Ham/vdata/la10.fjs', '2_Ham/sdata/la06.fjs', '2_Ham/sdata/la09.fjs', '2_Ham/sdata/la07.fjs', '2_Ham/sdata/la08.fjs', '2_Ham/sdata/la10.fjs']
+15 10 2 ['2_Ham/edata/la21.fjs', '2_Ham/edata/la22.fjs', '2_Ham/edata/la24.fjs', '2_Ham/edata/la25.fjs', '2_Ham/edata/la23.fjs', '2_Ham/rdata/la21.fjs', '2_Ham/rdata/la22.fjs', '2_Ham/rdata/la24.fjs', '2_Ham/rdata/la25.fjs', '2_Ham/rdata/la23.fjs', '2_Ham/vdata/la21.fjs', '2_Ham/vdata/la22.fjs', '2_Ham/vdata/la24.fjs', '2_Ham/vdata/la25.fjs', '2_Ham/vdata/la23.fjs', '2_Ham/sdata/la21.fjs', '2_Ham/sdata/la22.fjs', '2_Ham/sdata/la24.fjs', '2_Ham/sdata/la25.fjs', '2_Ham/sdata/la23.fjs']
+15 15 2 ['2_Ham/edata/la39.fjs', '2_Ham/edata/la37.fjs', '2_Ham/edata/la38.fjs', '2_Ham/edata/la40.fjs', '2_Ham/edata/la36.fjs', '2_Ham/rdata/la39.fjs', '2_Ham/rdata/la37.fjs', '2_Ham/rdata/la38.fjs', '2_Ham/rdata/la40.fjs', '2_Ham/rdata/la36.fjs', '2_Ham/vdata/la39.fjs', '2_Ham/vdata/la37.fjs', '2_Ham/vdata/la38.fjs', '2_Ham/vdata/la40.fjs', '2_Ham/vdata/la36.fjs', '2_Ham/sdata/la39.fjs', '2_Ham/sdata/la37.fjs', '2_Ham/sdata/la38.fjs', '2_Ham/sdata/la40.fjs', '2_Ham/sdata/la36.fjs']
+20 5 2 ['2_Ham/edata/la13.fjs', '2_Ham/edata/la12.fjs', '2_Ham/edata/la14.fjs', '2_Ham/edata/mt20.fjs', '2_Ham/edata/la15.fjs', '2_Ham/edata/la11.fjs', '2_Ham/rdata/la13.fjs', '2_Ham/rdata/la12.fjs', '2_Ham/rdata/la14.fjs', '2_Ham/rdata/mt20.fjs', '2_Ham/rdata/la15.fjs', '2_Ham/rdata/la11.fjs', '2_Ham/vdata/la13.fjs', '2_Ham/vdata/la12.fjs', '2_Ham/vdata/la14.fjs', '2_Ham/vdata/mt20.fjs', '2_Ham/vdata/la15.fjs', '2_Ham/vdata/la11.fjs', '2_Ham/sdata/la13.fjs', '2_Ham/sdata/la12.fjs', '2_Ham/sdata/la14.fjs', '2_Ham/sdata/mt20.fjs', '2_Ham/sdata/la15.fjs', '2_Ham/sdata/la11.fjs']
+20 10 2 ['2_Ham/edata/la26.fjs', '2_Ham/edata/la27.fjs', '2_Ham/edata/la29.fjs', '2_Ham/edata/la28.fjs', '2_Ham/edata/la30.fjs', '2_Ham/rdata/la26.fjs', '2_Ham/rdata/la27.fjs', '2_Ham/rdata/la29.fjs', '2_Ham/rdata/la28.fjs', '2_Ham/rdata/la30.fjs', '2_Ham/vdata/la26.fjs', '2_Ham/vdata/la27.fjs', '2_Ham/vdata/la29.fjs', '2_Ham/vdata/la28.fjs', '2_Ham/vdata/la30.fjs', '2_Ham/sdata/la26.fjs', '2_Ham/sdata/la27.fjs', '2_Ham/sdata/la29.fjs', '2_Ham/sdata/la28.fjs', '2_Ham/sdata/la30.fjs']
+20 15 1 ['2_Ham/sdata/abz9.fjs']
+20 15 2 ['2_Ham/edata/abz7.fjs', '2_Ham/edata/abz9.fjs', '2_Ham/edata/abz8.fjs', '2_Ham/rdata/abz7.fjs', '2_Ham/rdata/abz9.fjs', '2_Ham/rdata/abz8.fjs', '2_Ham/vdata/abz7.fjs', '2_Ham/vdata/abz9.fjs', '2_Ham/vdata/abz8.fjs', '2_Ham/sdata/abz7.fjs', '2_Ham/sdata/abz8.fjs']
+30 10 2 ['2_Ham/edata/la34.fjs', '2_Ham/edata/la32.fjs', '2_Ham/edata/la33.fjs', '2_Ham/edata/la35.fjs', '2_Ham/edata/la31.fjs', '2_Ham/rdata/la34.fjs', '2_Ham/rdata/la32.fjs', '2_Ham/rdata/la33.fjs', '2_Ham/rdata/la35.fjs', '2_Ham/rdata/la31.fjs', '2_Ham/vdata/la34.fjs', '2_Ham/vdata/la32.fjs', '2_Ham/vdata/la33.fjs', '2_Ham/vdata/la35.fjs', '2_Ham/vdata/la31.fjs', '2_Ham/sdata/la34.fjs', '2_Ham/sdata/la32.fjs', '2_Ham/sdata/la33.fjs', '2_Ham/sdata/la35.fjs', '2_Ham/sdata/la31.fjs']
+
+19 2_Ham/trucks_data/trucks_layout19.txt
+
+----------
+
+10 6 2 ['3_Homayouni_and_Fontes-Brandimarte/proc_data/mkt01.txt', '3_Homayouni_and_Fontes-Brandimarte/proc_data/mkt02.txt']
+10 15 2 ['3_Homayouni_and_Fontes-Brandimarte/proc_data/mkt06.txt']
+15 4 2 ['3_Homayouni_and_Fontes-Brandimarte/proc_data/mkt05.txt']
+15 8 2 ['3_Homayouni_and_Fontes-Brandimarte/proc_data/mkt03.txt', '3_Homayouni_and_Fontes-Brandimarte/proc_data/mkt04.txt']
+20 5 2 ['3_Homayouni_and_Fontes-Brandimarte/proc_data/mkt07.txt']
+20 10 2 ['3_Homayouni_and_Fontes-Brandimarte/proc_data/mkt08.txt', '3_Homayouni_and_Fontes-Brandimarte/proc_data/mkt09.txt']
+20 15 2 ['3_Homayouni_and_Fontes-Brandimarte/proc_data/mkt10.txt']
+
+4 3_Homayouni_and_Fontes-Brandimarte/trucks_data/trucks_times4.txt
+5 3_Homayouni_and_Fontes-Brandimarte/trucks_data/trucks_times5.txt
+6 3_Homayouni_and_Fontes-Brandimarte/trucks_data/trucks_times6.txt
+8 3_Homayouni_and_Fontes-Brandimarte/trucks_data/trucks_times8.txt
+10 3_Homayouni_and_Fontes-Brandimarte/trucks_data/trucks_times10.txt
+15 3_Homayouni_and_Fontes-Brandimarte/trucks_data/trucks_times15.txt
+
+----------
+
+5 6 2 ['4_Homayouni_and_Fontes-Fattahi/proc_data/mfjs01.txt']
+5 7 2 ['4_Homayouni_and_Fontes-Fattahi/proc_data/mfjs02.txt']
+6 7 2 ['4_Homayouni_and_Fontes-Fattahi/proc_data/mfjs03.txt']
+7 7 2 ['4_Homayouni_and_Fontes-Fattahi/proc_data/mfjs05.txt', '4_Homayouni_and_Fontes-Fattahi/proc_data/mfjs04.txt']
+8 7 2 ['4_Homayouni_and_Fontes-Fattahi/proc_data/mfjs07.txt', '4_Homayouni_and_Fontes-Fattahi/proc_data/mfjs06.txt']
+9 8 2 ['4_Homayouni_and_Fontes-Fattahi/proc_data/mfjs08.txt']
+11 8 2 ['4_Homayouni_and_Fontes-Fattahi/proc_data/mfjs09.txt']
+12 8 2 ['4_Homayouni_and_Fontes-Fattahi/proc_data/mfjs10.txt']
+
+6 4_Homayouni_and_Fontes-Fattahi/trucks_data/trucks_times6.txt
+7 4_Homayouni_and_Fontes-Fattahi/trucks_data/trucks_times7.txt
+8 4_Homayouni_and_Fontes-Fattahi/trucks_data/trucks_times8.txt
+
+----------
+
+10 5 2 ['5_Dauzere/proc_data/04a.txt', '5_Dauzere/proc_data/01a.txt', '5_Dauzere/proc_data/06a.txt', '5_Dauzere/proc_data/03a.txt', '5_Dauzere/proc_data/05a.txt', '5_Dauzere/proc_data/02a.txt']
+15 8 2 ['5_Dauzere/proc_data/10a.txt', '5_Dauzere/proc_data/07a.txt', '5_Dauzere/proc_data/09a.txt', '5_Dauzere/proc_data/08a.txt', '5_Dauzere/proc_data/12a.txt', '5_Dauzere/proc_data/11a.txt']
+20 10 2 ['5_Dauzere/proc_data/13a.txt', '5_Dauzere/proc_data/16a.txt', '5_Dauzere/proc_data/18a.txt', '5_Dauzere/proc_data/17a.txt', '5_Dauzere/proc_data/14a.txt', '5_Dauzere/proc_data/15a.txt']
+
+5 5_Dauzere/trucks_data/trucks_times5.txt
+8 5_Dauzere/trucks_data/trucks_times8.txt
+10 5_Dauzere/trucks_data/trucks_times10.txt

@@ -101,7 +101,8 @@ class FJSPTGenerator(Generator):
     def _simulate_trucks_times(self, batch_size) -> torch.Tensor:
         trucks_times = torch.randint(
             self.min_transportation_time,
-            self.max_transportation_time + 1,
+            # соблюдаем неравенство треугольника !!!
+            min(2 * self.min_transportation_time - 1, self.max_transportation_time),
             size=(batch_size, self.num_mas + 1, self.num_mas + 1),
             # Всего: LU + self.num_mas
         )
@@ -171,23 +172,23 @@ class FJSPTFileGenerator(Generator):
     """Data generator for the Flexible Job-Shop Scheduling Problem with Transportation resources (FJSPT)
     using instance files"""
 
-    def __init__(self, file_path: str, transportation_file_path: str, n_ops_max: int = None, **unused_kwargs):
-        self.files = self.list_files(file_path)
-        self.num_samples = len(self.files)
+    def __init__(self, proc_file_path: str, trucks_file_path: str, **unused_kwargs):
+        self.proc_files = self.list_files(proc_file_path)
+        self.num_samples = len(self.proc_files)
 
         if len(unused_kwargs) > 0:
             log.error(f"Found {len(unused_kwargs)} unused kwargs: {unused_kwargs}")
 
-        if len(self.files) > 1:
-            n_ops_max = get_max_ops_from_files(self.files)
+        if len(self.proc_files) > 1:
+            n_ops_max = get_max_ops_from_files(self.proc_files)
 
-        ret = map(partial(read, max_ops=n_ops_max), self.files)
+        ret = map(partial(read, max_ops=n_ops_max), self.proc_files)
 
         td_list, num_jobs, num_machines, num_trucks, max_ops_per_job = list(zip(*list(ret)))
-        num_jobs, num_machines = map(lambda x: x[0], (num_jobs, num_machines))
+        num_jobs, num_machines, num_trucks = map(lambda x: x[0], (num_jobs, num_machines, num_trucks))
         max_ops_per_job = max(max_ops_per_job)
 
-        trucks_times = torch.tensor(file2lines(transportation_file_path))
+        trucks_times = torch.tensor(file2lines(trucks_file_path))
         assert trucks_times.ndim == 2 and trucks_times.size(0) == trucks_times.size(1)
         # !!! есть датасеты с матрицей для большего числа станков - обрезаем матрицу
         trucks_times = trucks_times[:num_machines + 1, :num_machines + 1]

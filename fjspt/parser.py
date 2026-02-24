@@ -55,7 +55,7 @@ def get_max_ops_from_files(files):
     return max(map(get_n_ops_of_instance, files))
 
 
-def read(loc: Path, max_ops=None):
+def read(proc_locs: Path, max_ops=None):
     """
     Reads an FJSPLIB instance.
 
@@ -66,7 +66,7 @@ def read(loc: Path, max_ops=None):
     Returns:
         instance: the parsed instance
     """
-    lines = file2lines(loc)
+    lines = file2lines(proc_locs)
 
     # First line contains metadata.
     num_jobs, num_machines, num_trucks = lines[0][0], lines[0][1], lines[0][2]
