@@ -185,6 +185,7 @@ class FJSPTFileGenerator(Generator):
         ret = map(partial(read, max_ops=n_ops_max), self.proc_files)
 
         td_list, num_jobs, num_machines, num_trucks, max_ops_per_job = list(zip(*list(ret)))
+        # предполагается ОДИНАКОВОЕ число операций, доступных машинин и времён обработки
         num_jobs, num_machines, num_trucks = map(lambda x: x[0], (num_jobs, num_machines, num_trucks))
         max_ops_per_job = max(max_ops_per_job)
 
