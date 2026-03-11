@@ -108,7 +108,6 @@ class FJSPTEnv(EnvBase):
                 "ops_adj": ops_adj,
                 "job_ops_adj": ops_job_bin_map,
                 "ops_job_map": ops_job_map,
-                # "op_spatial_enc": ops_spatial_enc,
                 "ops_sequence_order": ops_seq_order,
             }
         )

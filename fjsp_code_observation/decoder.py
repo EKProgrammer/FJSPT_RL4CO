@@ -13,8 +13,6 @@ from rl4co.models.nn.graph.hgnn import HetGNNEncoder
 from rl4co.models.nn.mlp import MLP
 from rl4co.utils.ops import batchify, gather_by_index
 
-from .encoder import GCN4JSSP
-
 
 class L2DActor(nn.Module, metaclass=abc.ABCMeta):
     """Base decoder model for actor in L2D. The actor is responsible for generating the logits for the action
@@ -54,13 +52,20 @@ class L2DActor(nn.Module, metaclass=abc.ABCMeta):
         Returns:
             Tuple containing the updated hidden state(s) and the input TensorDict
         """
+        # Для FJSP hidden = (op_embeddings, machine_embeddings)
 
         hidden = (hidden,) if not isinstance(hidden, tuple) else hidden
+        # Для FJSP эта строка ничего не делает
 
         if num_starts > 1:
             # NOTE: when using pomo, we need this
+            # multistart: из одного состояния запустить несколько решений
             hidden = tuple(map(lambda x: batchify(x, num_starts), hidden))
-
+            # пример
+            # было:
+            # op_embeddings.shape = (32, 30, 128)
+            # если num_starts = 8, то
+            # станет: (32*8, 30, 128)
         return td, env, hidden
 
 
@@ -74,6 +79,7 @@ class FJSPActor(L2DActor):
     ) -> None:
         super().__init__()
         self.mlp = MLP(
+            # MLP принимает job embedding + machine embedding, поэтому:
             input_dim=2 * embed_dim,
             output_dim=1,
             num_neurons=[hidden_dim] * hidden_layers,
@@ -83,27 +89,46 @@ class FJSPActor(L2DActor):
             output_norm="None",
         )
         self.dummy = nn.Parameter(torch.rand(2 * embed_dim))
+        # Dummy параметр: Создается обучаемый вектор
+        # shape = (2 * embed_dim)
+        # Он используется для действия "ничего не делать" (noop).
+        # Позже он станет (bs, 1, 2*emb)
         self.check_nan = check_nan
+        # Если True, будет проверка: нет ли NaN в logits
 
     def forward(self, td, ops_emb, ma_emb):
+        # ops_emb	(bs, n_ops, emb)
+        # ma_emb	(bs, n_ma, emb)
+
         bs, n_ma = ma_emb.shape[:2]
-        # (bs, n_jobs, emb)
+
+        # td["next_op"].shape = (bs, n_jobs)
+        # td["next_op"] содержит индекс следующей операции для каждого job
+        # ops_emb.shape = (bs, n_ops, emb)
+        # gather берет embedding нужной операции для каждого job.
         job_emb = gather_by_index(ops_emb, td["next_op"], squeeze=False)
-        # (bs, n_jobs, n_ma, emb)
+        # job_emb.shape = (bs, n_jobs, emb)
+
         job_emb_expanded = job_emb.unsqueeze(2).expand(-1, -1, n_ma, -1)
+        # job_emb_expanded.shape = (bs, n_jobs, n_ma, emb)
+
         ma_emb_expanded = ma_emb.unsqueeze(1).expand_as(job_emb_expanded)
-        # (bs, num_jobs * n_ma, 2*emb)
+        # ma_emb_expanded.shape = (bs, n_jobs, n_ma, emb)
+
         h_actions = torch.cat((job_emb_expanded, ma_emb_expanded), dim=-1).flatten(1, 2)
-        # (bs, 1, 2*emb_dim)
+        # cat: shape = (bs, n_jobs, n_ma, 2*emb)
+        # flatten (склеиваем n_jobs и n_ma): h_actions.shape = (bs, n_jobs * n_ma, 2*emb)
+
         no_ops = self.dummy[None, None].expand(bs, 1, -1)
-        # (bs, num_jobs * n_ma + 1, 2*emb_dim)
+        # no_ops.shape = (bs, 1, 2*emb_dim)
         h_actions_w_noop = torch.cat((no_ops, h_actions), 1)
-        # (b, j*m)
+        # h_actions_w_noop.shape = (bs, n_jobs * n_ma + 1, 2*emb_dim)
         logits = self.mlp(h_actions_w_noop).squeeze(-1)
+        # logits.shape = (bs, n_jobs * n_ma + 1)
 
         if self.check_nan:
             assert not torch.isnan(logits).any(), "Logits contain NaNs"
-        # (b, 1 + j)
+        # (bs, n_jobs * n_ma + 1)
         mask = td["action_mask"]
         return logits, mask
 
@@ -138,12 +163,13 @@ class L2DDecoder(AutoregressiveDecoder):
                     scaling_factor=scaling_factor,
                 )
             else:
-                feature_extractor = GCN4JSSP(
-                    embed_dim,
-                    num_encoder_layers,
-                    init_embedding=init_embedding,
-                    scaling_factor=scaling_factor,
-                )
+                pass
+                # feature_extractor = GCN4JSSP(
+                #     embed_dim,
+                #     num_encoder_layers,
+                #     init_embedding=init_embedding,
+                #     scaling_factor=scaling_factor,
+                # )
 
         self.feature_extractor = feature_extractor
 
@@ -155,12 +181,13 @@ class L2DDecoder(AutoregressiveDecoder):
                     hidden_layers=actor_hidden_layers,
                 )
             else:
-                actor = JSSPActor(
-                    embed_dim=embed_dim,
-                    hidden_dim=actor_hidden_dim,
-                    hidden_layers=actor_hidden_layers,
-                    het_emb=het_emb,
-                )
+                pass
+                # actor = JSSPActor(
+                #     embed_dim=embed_dim,
+                #     hidden_dim=actor_hidden_dim,
+                #     hidden_layers=actor_hidden_layers,
+                #     het_emb=het_emb,
+                # )
 
         self.actor = actor
 
@@ -170,12 +197,12 @@ class L2DDecoder(AutoregressiveDecoder):
             # (through decoding strategy pre decoding hook). Thus the
             # embeddings from feature_extractor have the correct shape
             num_starts = 0
-            # (bs, n_j * n_ops, e), (bs, n_m, e)
             hidden, _ = self.feature_extractor(td)
+            # hidden = (ops_emb, ma_emb)
+            # ops_emb.shape = (bs, n_jobs * n_ops, emb_dim), ma_emb.shape = (bs, n_ma, emb_dim)
 
         td, _, hidden = self.actor.pre_decoder_hook(td, None, hidden, num_starts)
 
-        # (bs, n_j, e)
         logits, mask = self.actor(td, *hidden)
 
         return logits, mask

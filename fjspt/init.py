@@ -16,8 +16,7 @@ def env_init_embedding(env_name: str, config: dict) -> nn.Module:
         config: A dictionary of configuration options for the environment.
     """
     embedding_registry = {
-        "fjsp": FJSPInitEmbedding,
-        "jssp": FJSPInitEmbedding,
+        "fjspt": FJSPTInitEmbedding,
     }
 
     if env_name not in embedding_registry:
@@ -69,27 +68,50 @@ class JSSPInitEmbedding(nn.Module):
         return self._init_ops_embed(td)
 
 
-class FJSPInitEmbedding(JSSPInitEmbedding):
+class FJSPTInitEmbedding(JSSPInitEmbedding):
     def __init__(self, embed_dim, linear_bias=False, scaling_factor: int = 100):
         super().__init__(embed_dim, linear_bias, scaling_factor)
         self.init_ma_embed = nn.Linear(1, self.embed_dim, bias=linear_bias)
-        self.edge_embed = nn.Linear(1, embed_dim, bias=linear_bias)
+        self.init_truck_embed = nn.Linear(1, self.embed_dim, bias=linear_bias)
+        self.proc_edge_embed = nn.Linear(1, self.embed_dim, bias=linear_bias)
+        self.truck_edge_embed = nn.Linear(1, self.embed_dim, bias=linear_bias)
 
     def forward(self, td: TensorDict):
         ops_emb = self._init_ops_embed(td)
         ma_emb = self._init_machine_embed(td)
-        edge_emb = self._init_edge_embed(td)
+        truck_emb = self._init_truck_embed(td)
+        machine_edge_emb = self._init_proc_edge_embed(td)
+        truck_edge_emb = self._init_transport_edge_embed(td)
         # get edges between operations and machines
         # (bs, ops, ma)
-        edges = td["ops_ma_adj"].transpose(1, 2)
-        return ops_emb, ma_emb, edge_emb, edges
+        ops_ma_edges = td["ops_ma_adj"].transpose(1, 2)
 
-    def _init_edge_embed(self, td: TensorDict):
+        # broadcasting: (bs, num_trucks) and (bs, 1)
+        available_trucks = td["truck_busy_until"] < td["time"].unsqueeze(-1)
+        return ops_emb, ma_emb, truck_emb, machine_edge_emb, truck_edge_emb, ops_ma_edges, available_trucks
+
+    def _init_proc_edge_embed(self, td: TensorDict):
         proc_times = td["proc_times"].transpose(1, 2) / self.scaling_factor
-        edge_embed = self.edge_embed(proc_times.unsqueeze(-1))
+        edge_embed = self.proc_edge_embed(proc_times.unsqueeze(-1))
         return edge_embed
 
     def _init_machine_embed(self, td: TensorDict):
-        busy_for = (td["busy_until"] - td["time"].unsqueeze(1)) / self.scaling_factor
+        busy_for = (td["machine_busy_until"] - td["time"].unsqueeze(1)) / self.scaling_factor
         ma_embeddings = self.init_ma_embed(busy_for.unsqueeze(2))
         return ma_embeddings
+
+    def _init_truck_edge_embed(self, td):
+        trucks_times = td["trucks_times"] / self.scaling_factor
+        transport_emb = self.truck_edge_embed(trucks_times.unsqueeze(-1))
+        # trucks_times   (bs, n_mas + 1, n_mas + 1)
+        # unsqueeze      (bs, n_mas + 1, n_mas + 1, 1)
+        # transport_emb  (bs, n_mas+1, n_mas+1, emb_dim)
+        return transport_emb
+
+    def _init_truck_embed(self, td):
+        busy_for = (td["truck_busy_until"] - td["time"].unsqueeze(1)) / self.scaling_factor
+        truck_emb = self.init_truck_embed(busy_for.unsqueeze(-1))
+        # busy_for   (bs, n_trucks)
+        # unsqueeze  (bs, n_trucks, 1)
+        # truck_emb  (bs, n_trucks, emb_dim)
+        return truck_emb

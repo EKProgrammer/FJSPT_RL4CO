@@ -12,10 +12,7 @@ from rl4co.models.nn.ops import TransformerFFN
 
 
 class HetGNNLayer(nn.Module):
-    def __init__(
-        self,
-        embed_dim: int,
-    ) -> None:
+    def __init__(self, embed_dim: int):
         super().__init__()
 
         # Используется для вычисления attention к самому узлу.
@@ -133,25 +130,89 @@ class HetGNNLayer(nn.Module):
 
 
 class HetGNNBlock(nn.Module):
-    def __init__(self, embed_dim, normalization: str = "batch") -> None:
+    def __init__(self, embed_dim, normalization="batch"):
         super().__init__()
-        self.hgnn1 = HetGNNLayer(embed_dim)
-        self.hgnn2 = HetGNNLayer(embed_dim)
-        self.ffn1 = TransformerFFN(embed_dim, embed_dim * 2, normalization=normalization)
-        self.ffn2 = TransformerFFN(embed_dim, embed_dim * 2, normalization=normalization)
 
-    def forward(self, x1, x2, edge_emb, edges):
-        # Этот слой будет обновлять узлы первого типа.
         # machines ← operations
-        h1 = self.hgnn1(x1, x2, edge_emb, edges)
-        h1 = self.ffn1(h1, x1)
+        self.ma_from_ops = HetGNNLayer(embed_dim)
 
-        # Этот слой делает обратный message passing.
         # operations ← machines
-        h2 = self.hgnn2(x2, x1, edge_emb.transpose(1, 2), edges.transpose(1, 2))
-        h2 = self.ffn2(h2, x2)
+        self.ops_from_ma = HetGNNLayer(embed_dim)
 
-        return h1, h2
+        # machines ← machines (transport graph)
+        self.ma_from_ma = HetGNNLayer(embed_dim)
+
+        # trucks ← machines
+        self.truck_from_ma = HetGNNLayer(embed_dim)
+
+        self.ffn_ma = TransformerFFN(embed_dim, embed_dim * 2, normalization)
+        self.ffn_ops = TransformerFFN(embed_dim, embed_dim * 2, normalization)
+        self.ffn_truck = TransformerFFN(embed_dim, embed_dim * 2, normalization)
+
+    def forward(
+        self,
+        ops_emb,
+        ma_emb,
+        truck_emb,
+        machine_edge_emb,
+        truck_edge_emb,
+        ops_ma_edges,
+        available_trucks,
+    ):
+        # machines ← operations
+        ma_msg_ops = self.ma_from_ops(
+            ma_emb,
+            ops_emb,
+            machine_edge_emb,
+            ops_ma_edges,
+        )
+
+        # machines ← machines (transport)
+        ma_ma_edges = torch.ones(
+            ma_emb.size(0),
+            ma_emb.size(1),
+            ma_emb.size(1),
+            device=ma_emb.device,
+            dtype=torch.bool,
+        )
+        diag = torch.eye(ma_emb.size(1), device=ma_emb.device).bool()
+        ma_ma_edges[:, diag] = False
+        ma_msg_ma = self.ma_from_ma(
+            ma_emb,
+            ma_emb,
+            truck_edge_emb[:, : ma_emb.size(1), : ma_emb.size(1)],
+            ma_ma_edges,
+        )
+        ma_hidden = ma_msg_ops + ma_msg_ma
+        ma_hidden = self.ffn_ma(ma_hidden, ma_emb)
+
+        # operations ← machines
+        ops_msg = self.ops_from_ma(
+            ops_emb,
+            ma_emb,
+            machine_edge_emb.transpose(1, 2),
+            ops_ma_edges.transpose(1, 2),
+        )
+        ops_hidden = self.ffn_ops(ops_msg, ops_emb)
+
+        # trucks ← machines
+        truck_ma_edges = torch.ones(
+            truck_emb.size(0),
+            truck_emb.size(1),
+            ma_emb.size(1),
+            device=truck_emb.device,
+            dtype=torch.bool,
+        )
+        truck_ma_edges = truck_ma_edges & available_trucks.unsqueeze(-1)
+        truck_msg = self.truck_from_ma(
+            truck_emb,
+            ma_emb,
+            truck_edge_emb[:, :truck_emb.size(1), :ma_emb.size(1)],
+            truck_ma_edges,
+        )
+        truck_hidden = self.ffn_truck(truck_msg, truck_emb)
+
+        return ops_hidden, ma_hidden, truck_hidden
 
 
 class HetGNNEncoder(nn.Module):
@@ -161,7 +222,7 @@ class HetGNNEncoder(nn.Module):
         num_layers: int = 2,
         normalization: str = "batch",
         init_embedding=None,
-        env_name: str = "fjsp",
+        env_name: str = "fjspt",
         **init_embedding_kwargs,
     ) -> None:
         super().__init__()
@@ -174,17 +235,29 @@ class HetGNNEncoder(nn.Module):
 
         self.num_layers = num_layers
         self.layers = nn.ModuleList(
-            [HetGNNBlock(embed_dim, normalization) for _ in range(num_layers)]
+            [HetGNNBlock(embed_dim, normalization) for _ in range(self.num_layers)]
         )
 
     def forward(self, td):
-        row_emb, col_emb, edge_emb, edges = self.init_embedding(td)
-        # perform sanity check to validate correct order of row and col embeddings
-        n_rows, n_cols = edges.shape[1:]
-        assert row_emb.size(1) == n_rows, "incorrect number of row embeddings"
-        assert col_emb.size(1) == n_cols, "incorrect number of column embeddings"
+        (
+            ops_emb,
+            ma_emb,
+            truck_emb,
+            machine_edge_emb,
+            truck_edge_emb,
+            ops_ma_edges,
+            available_trucks
+        ) = self.init_embedding(td)
 
         for layer in self.layers:
-            row_emb, col_emb = layer(row_emb, col_emb, edge_emb, edges)
+            ops_emb, ma_emb, truck_emb = layer(
+                ops_emb,
+                ma_emb,
+                truck_emb,
+                machine_edge_emb,
+                truck_edge_emb,
+                ops_ma_edges,
+                available_trucks,
+            )
 
-        return (row_emb, col_emb), None
+        return (ops_emb, ma_emb, truck_emb), None

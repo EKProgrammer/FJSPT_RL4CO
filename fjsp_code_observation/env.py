@@ -621,7 +621,7 @@ class FJSPEnv(EnvBase):
         пора двигать время вперёд»
         
         td["action_mask"] - напоминание о формате
-        action_mask.shape = (bs, num_jobs * num_mas)
+        action_mask.shape = (bs, 1 + num_jobs * num_mas)
         
         reduce(td["action_mask"], "bs ... -> bs", "any")
         Для каждого элемента батча:
