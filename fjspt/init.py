@@ -81,14 +81,12 @@ class FJSPTInitEmbedding(JSSPInitEmbedding):
         ma_emb = self._init_machine_embed(td)
         truck_emb = self._init_truck_embed(td)
         machine_edge_emb = self._init_proc_edge_embed(td)
-        truck_edge_emb = self._init_transport_edge_embed(td)
+        truck_edge_emb = self._init_truck_edge_embed(td)
+        ma_ma_edge_emb = self._init_ma_ma_edge_embed(td)
         # get edges between operations and machines
         # (bs, ops, ma)
         ops_ma_edges = td["ops_ma_adj"].transpose(1, 2)
-
-        # broadcasting: (bs, num_trucks) and (bs, 1)
-        available_trucks = td["truck_busy_until"] < td["time"].unsqueeze(-1)
-        return ops_emb, ma_emb, truck_emb, machine_edge_emb, truck_edge_emb, ops_ma_edges, available_trucks
+        return ops_emb, ma_emb, truck_emb, machine_edge_emb, truck_edge_emb, ma_ma_edge_emb, ops_ma_edges
 
     def _init_proc_edge_embed(self, td: TensorDict):
         proc_times = td["proc_times"].transpose(1, 2) / self.scaling_factor
@@ -100,13 +98,28 @@ class FJSPTInitEmbedding(JSSPInitEmbedding):
         ma_embeddings = self.init_ma_embed(busy_for.unsqueeze(2))
         return ma_embeddings
 
-    def _init_truck_edge_embed(self, td):
+    def _init_ma_ma_edge_embed(self, td):
         trucks_times = td["trucks_times"] / self.scaling_factor
-        transport_emb = self.truck_edge_embed(trucks_times.unsqueeze(-1))
+        ma_ma_edge_emb = self.truck_edge_embed(trucks_times.unsqueeze(-1))
         # trucks_times   (bs, n_mas + 1, n_mas + 1)
         # unsqueeze      (bs, n_mas + 1, n_mas + 1, 1)
-        # transport_emb  (bs, n_mas+1, n_mas+1, emb_dim)
-        return transport_emb
+        # ma_ma_edge_emb  (bs, n_mas + 1, n_mas + 1, emb_dim)
+        return ma_ma_edge_emb
+
+    def _init_truck_edge_embed(self, td):
+        truck_loc = td["trucks_location"]  # (bs, n_trucks)
+        trucks_times = td["trucks_times"]  # (bs, n_mas+1, n_mas+1)
+        truck_loc_exp = truck_loc.unsqueeze(-1).expand(-1, -1, trucks_times.size(-1))
+        truck_to_all = torch.gather(
+            trucks_times,
+            1,
+            truck_loc_exp,
+        )  # (bs, n_trucks, n_mas+1)
+        truck_to_machine = truck_to_all[:, :, 1:]  # (bs, n_trucks, n_mas) без LU
+        truck_edge_emb = self.truck_edge_embed(
+            (truck_to_machine / self.scaling_factor).unsqueeze(-1)
+        )  # (bs, n_trucks, n_mas, emb_dim)
+        return truck_edge_emb
 
     def _init_truck_embed(self, td):
         busy_for = (td["truck_busy_until"] - td["time"].unsqueeze(1)) / self.scaling_factor

@@ -12,6 +12,9 @@ from rl4co.models.nn.ops import TransformerFFN
 
 
 class HetGNNLayer(nn.Module):
+    # Его не нужно переписывать, т. к. он работает с любой парой типов узлов:
+    # self_emb  → узлы A
+    # other_emb → узлы B
     def __init__(self, embed_dim: int):
         super().__init__()
 
@@ -135,13 +138,10 @@ class HetGNNBlock(nn.Module):
 
         # machines ← operations
         self.ma_from_ops = HetGNNLayer(embed_dim)
-
         # operations ← machines
         self.ops_from_ma = HetGNNLayer(embed_dim)
-
         # machines ← machines (transport graph)
         self.ma_from_ma = HetGNNLayer(embed_dim)
-
         # trucks ← machines
         self.truck_from_ma = HetGNNLayer(embed_dim)
 
@@ -156,10 +156,10 @@ class HetGNNBlock(nn.Module):
         truck_emb,
         machine_edge_emb,
         truck_edge_emb,
+        ma_ma_edge_emb,
         ops_ma_edges,
-        available_trucks,
     ):
-        # machines ← operations
+        # machines <- operations
         ma_msg_ops = self.ma_from_ops(
             ma_emb,
             ops_emb,
@@ -167,7 +167,7 @@ class HetGNNBlock(nn.Module):
             ops_ma_edges,
         )
 
-        # machines ← machines (transport)
+        # machines <- machines (transport)
         ma_ma_edges = torch.ones(
             ma_emb.size(0),
             ma_emb.size(1),
@@ -180,13 +180,13 @@ class HetGNNBlock(nn.Module):
         ma_msg_ma = self.ma_from_ma(
             ma_emb,
             ma_emb,
-            truck_edge_emb[:, : ma_emb.size(1), : ma_emb.size(1)],
+            ma_ma_edge_emb[:, 1:, 1:],
             ma_ma_edges,
         )
         ma_hidden = ma_msg_ops + ma_msg_ma
         ma_hidden = self.ffn_ma(ma_hidden, ma_emb)
 
-        # operations ← machines
+        # operations <- machines
         ops_msg = self.ops_from_ma(
             ops_emb,
             ma_emb,
@@ -195,7 +195,7 @@ class HetGNNBlock(nn.Module):
         )
         ops_hidden = self.ffn_ops(ops_msg, ops_emb)
 
-        # trucks ← machines
+        # trucks <- machines
         truck_ma_edges = torch.ones(
             truck_emb.size(0),
             truck_emb.size(1),
@@ -203,11 +203,10 @@ class HetGNNBlock(nn.Module):
             device=truck_emb.device,
             dtype=torch.bool,
         )
-        truck_ma_edges = truck_ma_edges & available_trucks.unsqueeze(-1)
         truck_msg = self.truck_from_ma(
             truck_emb,
             ma_emb,
-            truck_edge_emb[:, :truck_emb.size(1), :ma_emb.size(1)],
+            truck_edge_emb,
             truck_ma_edges,
         )
         truck_hidden = self.ffn_truck(truck_msg, truck_emb)
@@ -245,9 +244,18 @@ class HetGNNEncoder(nn.Module):
             truck_emb,
             machine_edge_emb,
             truck_edge_emb,
+            ma_ma_edge_emb,
             ops_ma_edges,
-            available_trucks
         ) = self.init_embedding(td)
+
+        # Shapes:
+        # ops_emb - (bs, n_ops, emb_dim)
+        # ma_emb - (bs, n_mas, emb_dim)
+        # truck_emb - (bs, n_trucks, emb_dim)
+        # machine_edge_emb - (bs, n_mas, n_ops, emb_dim)
+        # truck_edge_emb - (bs, n_mas+1, n_mas+1, emb_dim)
+        # ops_ma_edges - (bs, n_mas, n_ops)
+        # available_trucks - (bs, n_trucks)
 
         for layer in self.layers:
             ops_emb, ma_emb, truck_emb = layer(
@@ -256,8 +264,8 @@ class HetGNNEncoder(nn.Module):
                 truck_emb,
                 machine_edge_emb,
                 truck_edge_emb,
+                ma_ma_edge_emb,
                 ops_ma_edges,
-                available_trucks,
             )
 
         return (ops_emb, ma_emb, truck_emb), None
