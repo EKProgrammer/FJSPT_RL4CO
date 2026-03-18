@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_op_features(td: TensorDict):
-    return torch.stack((td["lbs"], td["is_ready"], td["num_eligible"]), dim=-1)
+    return torch.stack((td["lbs"], td["is_ready"], td["num_eligible_mas"]), dim=-1)
 
 
 def cat_and_norm_features(td: TensorDict, feats: list[str], time_feats: list[str], norm_const: int):

@@ -48,7 +48,7 @@ class JSSPInitEmbedding(nn.Module):
             mean_durations / self.scaling_factor,
             # td["lbs"] / self.scaling_factor,
             td["is_ready"],
-            td["num_eligible"],
+            td["num_eligible_mas"],
             td["ops_job_map"],
             td["op_scheduled"],
         ]

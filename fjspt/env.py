@@ -121,99 +121,109 @@ class FJSPTEnv(EnvBase):
 
         td_reset, n_ops_max = self._decode_graph_structure(td_reset)
 
-        # schedule
         start_op_per_job = td_reset["start_op_per_job"]
-        machine_start_times = torch.zeros((*batch_size, n_ops_max))
-        machine_finish_times = torch.full((*batch_size, n_ops_max), INIT_FINISH)
-        truck_start_times = torch.zeros((*batch_size, self.num_trucks))
-        truck_finish_times = torch.full((*batch_size, self.num_trucks), INIT_FINISH)
-        ma_assignment = torch.zeros((*batch_size, self.num_mas, n_ops_max))
 
-        # reset feature space
-        machine_busy_until = torch.zeros((*batch_size, self.num_mas))
-        truck_busy_until = torch.zeros((*batch_size, self.num_trucks))
         # (bs, ma, ops)
         ops_ma_adj = (td_reset["proc_times"] > 0).to(torch.float32)
         # (bs, ops)
-        num_eligible = torch.sum(ops_ma_adj, dim=1)
-
-        td["job_location"][batch_idx, selected_job] = selected_machine
-        td["truck_location"][batch_idx, selected_truck] = selected_machine
+        num_eligible_mas = torch.sum(ops_ma_adj, dim=1)
 
         td_reset = td_reset.update(
             {
-                "machine_start_times": machine_start_times,
-                "machine_finish_times": machine_finish_times,
-                "truck_start_times": truck_start_times,
-                "truck_finish_times": truck_finish_times,
-                "ma_assignment": ma_assignment,
-                "machine_busy_until": machine_busy_until,
-                "truck_busy_until": truck_busy_until,
-                "num_eligible": num_eligible,
+                "truck_operation": torch.zeros((*batch_size,)),
+                "machine_start_times": torch.zeros((*batch_size, n_ops_max)),
+                "machine_finish_times": torch.full((*batch_size, n_ops_max), INIT_FINISH),
+                "truck_start_times": torch.zeros((*batch_size, self.num_trucks)),
+                "truck_finish_times": torch.full((*batch_size, self.num_trucks), INIT_FINISH),
+                "ma_assignment":  torch.zeros((*batch_size, self.num_mas, n_ops_max)),
+                "machine_busy_until": torch.zeros((*batch_size, self.num_mas)),
+                "truck_busy_until": torch.zeros((*batch_size, self.num_trucks)),
+                "num_eligible_mas": num_eligible_mas,
                 "next_op": start_op_per_job.clone().to(torch.int64),
                 "ops_ma_adj": ops_ma_adj,
                 "op_scheduled": torch.full((*batch_size, n_ops_max), False),
                 "job_in_process": torch.full((*batch_size, self.num_jobs), False),
+                "truck_in_process": torch.full((*batch_size, self.num_trucks), False),
+                # LU - 0 - начальная позиция trucks
+                "truck_location": torch.zeros((*batch_size, self.num_trucks)),
+                "job_tr_ops": torch.full((*batch_size, self.n_ops_max), INIT_FINISH),
+                "truck_tr_ops": torch.full((*batch_size, self.n_ops_max), INIT_FINISH),
                 "reward": torch.zeros((*batch_size,), dtype=torch.float32),
                 "time": torch.zeros((*batch_size,)),
                 "job_done": torch.full((*batch_size, self.num_jobs), False),
                 "done": torch.full((*batch_size, 1), False),
-                # перевозит ли данный грузовик какую-то деталь
-                "truck_in_process": torch.full((*batch_size, self.num_trucks), False),
             },
         )
 
-        td_reset.set("machine_action_mask", self.get_machine_action_mask(td_reset))
-        td_reset.set("transportation_action_mask", self.get_transportation_action_mask(td_reset))
+        td_reset.set("action_mask", self.get_action_mask(td_reset))
         # add additional features to tensordict
         td_reset["lbs"] = calc_lower_bound(td_reset)
         td_reset = self._get_features(td_reset)
 
         return td_reset
 
-    def _get_job_machine_availability(self, td: TensorDict):
-        batch_size = td.size(0)
+    def _get_job_availability(self, td):
+        # (bs, jobs)
+        job_mask = torch.zeros_like(td["job_done"], dtype=torch.bool)
 
-        # (bs, jobs, machines)
-        machine_action_mask = torch.full((batch_size, self.num_jobs, self.num_mas), False).to(td.device)
+        job_mask |= td["job_done"]
+        job_mask |= td["job_in_process"]
 
-        # mask jobs that are done already
-        machine_action_mask.add_(td["job_done"].unsqueeze(2))
-        # as well as jobs that are currently processed
-        machine_action_mask.add_(td["job_in_process"].unsqueeze(2))
-
-        # mask machines that are currently busy
-        machine_action_mask.add_(td["machine_busy_until"].gt(td["time"].unsqueeze(1)).unsqueeze(1))
-
-        # exclude job-machine combinations, where the machine cannot process the next machine op of the job
+        # нет доступных машин для следующей операции
         next_ops_proc_times = gather_by_index(
-            td["proc_times"], td["next_op"].unsqueeze(1), dim=2, squeeze=False
+            td["proc_times"],
+            td["next_op"].unsqueeze(1),
+            dim=2,
+            squeeze=False
         ).transpose(1, 2)
-        machine_action_mask.add_(next_ops_proc_times == 0)
-        return machine_action_mask
 
-    def get_machine_action_mask(self, td: TensorDict) -> torch.Tensor:
-        # 1 indicates machine or job is unavailable at current time step
-        machine_action_mask = self._get_job_machine_availability(td)
+        no_machine_available = (next_ops_proc_times == 0).all(dim=2)
+        job_mask |= no_machine_available
+
+        return job_mask  # True = нельзя
+
+    def _get_machine_availability(self, td):
+        # (bs, machines)
+        return td["machine_busy_until"] > td["time"].unsqueeze(1)
+
+    def _get_truck_availability(self, td):
+        # (bs, trucks)
+        return td["truck_busy_until"] > td["time"].unsqueeze(1)
+
+    def get_action_mask(self, td: TensorDict):
+        job_mask = self._get_job_availability(td)  # (bs, j)
+        machine_mask = self._get_machine_availability(td)  # (bs, m)
+        truck_mask = self._get_truck_availability(td)  # (bs, t)
+
+        next_ops_proc_times = gather_by_index(
+            td["proc_times"],
+            td["next_op"].unsqueeze(1),
+            dim=2,
+            squeeze=False
+        ).transpose(1, 2)  # (bs, j, m)
+        eligible_mask = (next_ops_proc_times == 0)  # True = нельзя
+
+        # расширяем размерности
+        job_mask = job_mask.unsqueeze(2).unsqueeze(3)          # (bs, j, 1, 1)
+        truck_mask = truck_mask.unsqueeze(1).unsqueeze(3)      # (bs, 1, t, 1)
+        machine_mask = machine_mask.unsqueeze(1).unsqueeze(2)  # (bs, 1, 1, m)
+        eligible_mask = eligible_mask.unsqueeze(2)             # (bs, j, 1, m)
+
+        # объединяем
+        full_mask = job_mask | truck_mask | machine_mask | eligible_mask  # (bs, j, t, m)
+        flat_mask = rearrange(full_mask, "bs j t m -> bs (j t m)")
+
         if self.mask_no_ops:
-            # masking is only allowed if instance is finished
             no_op_mask = td["done"]
         else:
-            # if no job is currently processed and instance is not finished yet, waiting is not allowed
-            no_op_mask = (td["job_in_process"].any(1, keepdims=True) & (~td["done"])) | td["done"]
-        # flatten action mask to correspond with logit shape
-        machine_action_mask = rearrange(machine_action_mask, "bs j m -> bs (j m)")
-        # NOTE: 1 means feasible action, 0 means infeasible action
-        mask = torch.cat((no_op_mask, ~machine_action_mask), dim=1)
+            no_op_mask = (
+                td["job_in_process"].any(1, keepdim=True) & (~td["done"])
+            ) | td["done"]
 
-        return mask
-
-    def _get_job_trucks_availability(self, td: TensorDict):
-        pass
-
-    def get_transportation_action_mask(self, td: TensorDict) -> torch.Tensor:
-        transportation_action_mask = self._get_job_trucks_availability(td)
-        pass
+        final_mask = torch.cat((no_op_mask, ~flat_mask), dim=1)
+        # 1 = можно
+        # 0 = нельзя
+        return final_mask
 
     def _translate_action(self, td):
         """Разбивает одно число action на три составляющих."""
@@ -255,15 +265,14 @@ class FJSPTEnv(EnvBase):
         td[req_op] = td_op
 
         # machine action mask
-        td.set("machine_action_mask", self.get_machine_action_mask(td))
-
+        td.set("action_mask", self.get_action_mask(td))
         step_complete = self._check_step_complete(td, dones)
         while step_complete.any():
             td, dones = self._transit_to_next_time(step_complete, td)
-            td.set("machine_action_mask", self.get_machine_action_mask(td))
+            td.set("action_mask", self.get_action_mask(td))
             step_complete = self._check_step_complete(td, dones)
         if self.check_mask:
-            assert reduce(td["machine_action_mask"], "bs ... -> bs", "any").all()
+            assert reduce(td["action_mask"], "bs ... -> bs", "any").all()
 
         if self.stepwise_reward:
             # if we require a stepwise reward, the change in the calculated lower bounds could serve as such
@@ -278,7 +287,9 @@ class FJSPTEnv(EnvBase):
 
         return td
 
+    # МОДИФИЦИРОВАТЬ
     def _get_features(self, td):
+        # ИСПОЛЬЗУЕТСЯ для фичей в init.py в JSSPInitEmbedding
         # after we have transitioned to a next time step, we determine which operations are ready
         td["is_ready"] = op_is_ready(td)
         # td["lbs"] = calc_lower_bound(td)
@@ -291,8 +302,9 @@ class FJSPTEnv(EnvBase):
         time step. If this is not the case (and the instance is not done),
         we need to adance the timer of the repsective instance
         """
-        return ~reduce(td["machine_action_mask"], "bs ... -> bs", "any") & ~dones
+        return ~reduce(td["action_mask"], "bs ... -> bs", "any") & ~dones
 
+    # МОДИФИЦИРОВАТЬ
     def _make_step(self, td: TensorDict) -> TensorDict:
         """
         Environment transition function
@@ -301,7 +313,7 @@ class FJSPTEnv(EnvBase):
         batch_idx = torch.arange(td.size(0))
 
         # 3*(#req_op)
-        selected_job, selected_op, selected_truck, selected_machine = self._translate_action(td)
+        selected_job, machine_op, selected_truck, selected_machine = self._translate_action(td)
 
         # 1. Считаем время транспортировки
         # Откуда забираем деталь
@@ -315,7 +327,7 @@ class FJSPTEnv(EnvBase):
 
         # Грузовик может начать движение только когда он свободен
         # Деталь можно забрать, когда она готова (закончена прошлая операция)
-        truck_ready_to_pick = td["truck_busy_until"][batch_idx, selected_truck],
+        truck_ready_to_pick = td["truck_busy_until"][batch_idx, selected_truck]
 
         arrival_at_job = truck_ready_to_pick + dist_empty
         arrival_at_machine = arrival_at_job + dist_loaded
@@ -323,32 +335,30 @@ class FJSPTEnv(EnvBase):
         # 2. Считаем время обработки
         # Станок начинает работу, когда приехала деталь И станок освободился
         proc_start = torch.max(arrival_at_machine, td["machine_busy_until"][batch_idx, selected_machine])
-        proc_time = td["proc_times"][batch_idx, selected_machine, selected_op]
+        proc_time = td["proc_times"][batch_idx, selected_machine, machine_op]
         proc_end = proc_start + proc_time
 
-        # mark job as being processed
-        td["job_in_process"][batch_idx, selected_job] = 1
+        # Обновляем MACHINE STATE
+        td["job_in_process"][batch_idx, selected_job] = True
+        td["op_scheduled"][batch_idx, machine_op] = True
 
-        # mark op as schedules
-        td["op_scheduled"][batch_idx, selected_op] = True
+        td["machine_start_times"][batch_idx, machine_op] = proc_start
+        td["machine_finish_times"][batch_idx, machine_op] = proc_end
+        td["ma_assignment"][batch_idx, selected_machine, machine_op] = 1
 
-        # update machine state
-        proc_time_of_action = td["proc_times"][batch_idx, selected_machine, selected_op]
-        # we may not select a machine that is busy
-        assert torch.all(td["machine_busy_until"][batch_idx, selected_machine] <= td["time"])
-
-        # update schedule
-        td["machine_start_times"][batch_idx, selected_op] = proc_start
-        td["machine_finish_times"][batch_idx, selected_op] = proc_end  # !!! selected_op
-        td["ma_assignment"][batch_idx, selected_machine, selected_op] = 1
-
-        # td["truck_start_times"][batch_idx, selected_truck] =
-        # td["truck_finish_times"][batch_idx, selected_truck] =
-        # Нужны ли вообще machine_start_times, machine_finish_times, truck_start_times, truck_finish_times?
-
-        # update the state of the selected machine
-        td["machine_busy_until"][batch_idx, selected_machine] = arrival_at_machine  # !!! selected_machine
         td["machine_busy_until"][batch_idx, selected_machine] = proc_end
+
+        # Обновляем TRUCK STATE
+        truck_op = td["truck_operation"]  # индекс транспортной операции
+        td["truck_operation"] += 1
+
+        td["truck_start_times"][batch_idx, selected_truck] = truck_ready_to_pick
+        td["truck_finish_times"][batch_idx, selected_truck] = arrival_at_machine
+        td["truck_busy_until"][batch_idx, selected_truck] = arrival_at_machine
+        td["truck_in_process"][batch_idx, selected_truck] = True
+
+        td["job_tr_ops"][batch_idx, truck_op] = selected_job
+        td["truck_tr_ops"][batch_idx, truck_op] = selected_truck
 
         # Обновляем локации для следующих шагов
         td["job_location"][batch_idx, selected_job] = selected_machine
@@ -357,23 +367,20 @@ class FJSPTEnv(EnvBase):
         # update adjacency matrices (remove edges)
         td["proc_times"] = td["proc_times"].scatter(
             2,
-            selected_op[:, None, None].expand(-1, self.num_mas, 1),
+            machine_op[:, None, None].expand(-1, self.num_mas, 1),
             torch.zeros_like(td["proc_times"]),
         )
         td["ops_ma_adj"] = td["proc_times"].contiguous().gt(0).to(torch.float32)
-        td["num_eligible"] = torch.sum(td["ops_ma_adj"], dim=1)
+        td["num_eligible_mas"] = torch.sum(td["ops_ma_adj"], dim=1)
+
         # update the positions of an operation in the job (subtract 1 from each operation of the selected job)
         td["ops_sequence_order"] = (
             td["ops_sequence_order"] - gather_by_index(td["job_ops_adj"], selected_job, 1)
         ).clip(0)
-        # some checks
-        # assert torch.allclose(
-        #     td["proc_times"].sum(1).gt(0).sum(1),  # num ops with eligible machine
-        #     (~(td["op_scheduled"] + td["pad_mask"])).sum(1),  # num unscheduled ops
-        # )
 
         return td
 
+    # МОДИФИЦИРОВАТЬ
     def _transit_to_next_time(self, step_complete, td: TensorDict) -> TensorDict:
         """
         Transit to the next time
@@ -456,6 +463,14 @@ class FJSPTEnv(EnvBase):
                 shape=(self.n_ops_max,),
                 dtype=torch.int64,
             ),
+            truck_start_times=Unbounded(
+                shape=(self.num_trucks,),
+                dtype=torch.bool,
+            ),
+            truck_finish_times=Unbounded(
+                shape=(self.num_trucks,),
+                dtype=torch.bool,
+            ),
             job_ops_adj=Unbounded(
                 shape=(self.num_jobs, self.n_ops_max),
                 dtype=torch.int64,
@@ -480,12 +495,16 @@ class FJSPTEnv(EnvBase):
                 shape=(self.num_trucks,),
                 dtype=torch.int64,
             ),
-            num_eligible=Unbounded(
+            num_eligible_mas=Unbounded(
                 shape=(self.n_ops_max,),
                 dtype=torch.int64,
             ),
             job_in_process=Unbounded(
                 shape=(self.num_jobs,),
+                dtype=torch.bool,
+            ),
+            truck_in_process=Unbounded(
+                shape=(self.num_trucks,),
                 dtype=torch.bool,
             ),
             job_done=Unbounded(
@@ -494,18 +513,6 @@ class FJSPTEnv(EnvBase):
             ),
             action_type=Unbounded(
                 shape=(self.num_jobs,),
-                dtype=torch.bool,
-            ),
-            truck_in_process=Unbounded(
-                shape=(self.num_trucks,),
-                dtype=torch.bool,
-            ),
-            truck_start_times=Unbounded(
-                shape=(self.num_trucks,),
-                dtype=torch.bool,
-            ),
-            truck_finish_times=Unbounded(
-                shape=(self.num_trucks,),
                 dtype=torch.bool,
             ),
             shape=(),
