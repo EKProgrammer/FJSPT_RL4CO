@@ -5,7 +5,7 @@ import torch
 from tensordict import TensorDict
 from torch import Size, Tensor
 
-from rl4co.envs.scheduling.fjsp import INIT_FINISH
+from constants import INIT_FINISH
 
 logger = logging.getLogger(__name__)
 
@@ -208,9 +208,9 @@ def calc_lower_bound(td: TensorDict):
     """
 
     proc_times = td["proc_times"].clone()  # (bs, ma, ops)
-    busy_until = td["busy_until"]  # (bs, ma)
+    machine_busy_until = td["machine_busy_until"]  # (bs, ma)
     ops_adj = td["ops_adj"]  # (bs, ops, ops, 2)
-    finish_times = td["finish_times"]  # (bs, ops)
+    machine_finish_times = td["machine_finish_times"]  # (bs, ops)
     job_ops_adj = td["job_ops_adj"]  # (bs, jobs, ops)
     op_scheduled = td["op_scheduled"].to(torch.float32)  # (bs, ops)
 
@@ -218,9 +218,9 @@ def calc_lower_bound(td: TensorDict):
     # for operations whose immidiate predecessor is scheduled, we can determine its earliest
     # start time by the end time of the predecessor.
     # (bs, num_ops, 1)
-    maybe_start_at = torch.bmm(ops_adj[..., 0], finish_times[..., None]).squeeze(2)
+    maybe_start_at = torch.bmm(ops_adj[..., 0], machine_finish_times[..., None]).squeeze(2)
     # using the start_time, we can determine if and how long an op needs to wait for a machine to finish
-    wait_for_ma_offset = torch.clip(busy_until[..., None] - maybe_start_at[:, None], 0)
+    wait_for_ma_offset = torch.clip(machine_busy_until[..., None] - maybe_start_at[:, None], 0)
     # we add this required waiting time to the respective processing time
     proc_time_plus_wait = torch.where(proc_times == 0, proc_times, proc_times + wait_for_ma_offset)
     # NOTE get the mean processing time over all eligible machines for lb calulation
@@ -230,22 +230,22 @@ def calc_lower_bound(td: TensorDict):
     ops_proc_times[op_scheduled.to(torch.bool)] = 0
 
     ############### REGARDING POINT 2 OF DOCSTRING ###################
-    # Now we determine all operations that are not scheduled yet (and thus have no finish_time). We will compute the cumulative
+    # Now we determine all operations that are not scheduled yet (and thus have no machine_finish_time). We will compute the cumulative
     # sum over the processing time to determine the lower bound of unscheduled operations...
     proc_matrix = job_ops_adj
     ops_assigned = proc_matrix * op_scheduled[:, None]
     proc_matrix_not_scheduled = proc_matrix * (torch.ones_like(proc_matrix) - op_scheduled[:, None])
 
-    # ...and add the finish_time of the last scheduled operation of the respective job to that. To make this work, using the cumsum logic,
+    # ...and add the machine_finish_time of the last scheduled operation of the respective job to that. To make this work, using the cumsum logic,
     # we calc the first differences of the finish times and seperate by job.
     # We use the first differences, so that the finish times do not add up during cumulative sum below
     # (bs, num_jobs, num_ops)
-    finish_times_1st_diff = ops_assigned * first_diff(ops_assigned * finish_times[:, None], 2)
+    machine_finish_times_1st_diff = ops_assigned * first_diff(ops_assigned * machine_finish_times[:, None], 2)
 
     # masking the processing time of scheduled operations and add their finish times instead (first diff thereof)
     lb_end_expand = (
         proc_matrix_not_scheduled * ops_proc_times.unsqueeze(1).expand_as(job_ops_adj)
-        + finish_times_1st_diff
+        + machine_finish_times_1st_diff
     )
     # (bs, max_ops); lower bound finish time per operation using the cumsum logic
     LBs = torch.sum(job_ops_adj * lb_end_expand.cumsum(-1), dim=1)
@@ -253,7 +253,7 @@ def calc_lower_bound(td: TensorDict):
     LBs = torch.nan_to_num(LBs, nan=0.0)
 
     # test
-    assert torch.where(finish_times != INIT_FINISH, torch.isclose(LBs, finish_times), True).all()
+    assert torch.where(machine_finish_times != INIT_FINISH, torch.isclose(LBs, machine_finish_times), True).all()
 
     return LBs
 
@@ -261,7 +261,7 @@ def calc_lower_bound(td: TensorDict):
 def op_is_ready(td: TensorDict):
     # compare finish times of predecessors with current time step; shape=(b, n_ops_max)
     is_ready = (
-        torch.bmm(td["ops_adj"][..., 0], td["finish_times"][..., None]).squeeze(2)
+        torch.bmm(td["ops_adj"][..., 0], td["machine_finish_times"][..., None]).squeeze(2)
         <= td["time"][:, None]
     )
     # shape=(b, n_ops_max)

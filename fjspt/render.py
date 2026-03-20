@@ -16,7 +16,7 @@ def render(td: TensorDict, idx: int):
 
     n_jobs = inst["job_ops_adj"].size(0)
     n_machines = inst["ma_assignment"].size(0)
-    n_trucks = inst["truck_start_times"].size(0)
+    n_trucks = inst["truck_in_process"].size(0)
 
     machine_colors = plt.cm.Set2(np.linspace(0, 1, max(n_machines, 1)))
     machine_cmap = ListedColormap(machine_colors)
@@ -35,49 +35,49 @@ def render(td: TensorDict, idx: int):
 
     # n_ops_max = числу производственных операций
     # n_ops_max = числу транспортировочных операций
-    truck_start_times = td["truck_start_times"]  # (bs, num_trucks, n_ops_max)
-    truck_finish_times = td["truck_finish_times"]  # (bs, num_trucks, n_ops_max)
-    job_tr_ops = td["job_tr_ops"]  # (bs, n_ops_max) номер job
-    truck_tr_ops = td["truck_tr_ops"]  # (bs, n_ops_max) номер truck
+    truck_start_times = inst["truck_start_times"]  # (n_ops_max,)
+    truck_finish_times = inst["truck_finish_times"]  # (n_ops_max,)
+    job_tr_ops = inst["job_tr_ops"]  # (n_ops_max,) номер job
+    truck_tr_ops = inst["truck_tr_ops"]  # (n_ops_max,) номер truck
     trucks_schedule = defaultdict(list)
-    for op in range(job_tr_ops.size(1)):
-        job = job_tr_ops[op]
-        truck = truck_tr_ops[op]
+    for op in range(1, inst["truck_operation"] + 1):
+        job = job_tr_ops[op].item()
+        truck = truck_tr_ops[op].item()
         truck_start = truck_start_times[op]
         truck_end = truck_finish_times[op]
         trucks_schedule[truck].append((job, truck_start, truck_end))
 
-    _, ax = plt.subplots()
+    _, ax = plt.subplots(figsize=(15, 10))
 
     # Plot horizontal bars for each processing task
     for ma, ops in machine_schedule.items():
         for op, start, end in ops:
             job = inst["job_ops_adj"][:, op].nonzero().item()
             ax.barh(
-                ma,
+                job,
                 end - start,
                 left=start,
                 height=0.6,
-                color=machine_cmap(ma % machine_cmap.N),
-                edgecolor="black",
+                color=machine_cmap(ma),
+                edgecolor="gray",
                 linewidth=1,
             )
-            ax.text(start + (end - start) / 2, job, op, ha="center", va="center", color="white")
+            ax.text(start + (end - start) / 2, job, op, ha="center", va="center", color="black")
 
     # Plot horizontal bars for each transportation task
     for tr, ops in trucks_schedule.items():
         for job, start, end in ops:
             ax.barh(
-                tr,
+                job,
                 end - start,
                 left=start,
                 height=0.6,
-                color=truck_cmap(tr % truck_cmap.N),
-                edgecolor="black",
+                color=truck_cmap(tr),
+                edgecolor="gray",
                 hatch="//",
                 linewidth=1,
             )
-            ax.text(start + (end - start) / 2, job, tr, ha="center", va="center", color="white")
+            ax.text(start + (end - start) / 2, job, tr, ha="center", va="center", color="black")
 
     # Set labels and title
     ax.set_yticks(range(n_jobs))
@@ -88,45 +88,46 @@ def render(td: TensorDict, idx: int):
     # 1. Machine legend
     if n_machines > 0:
         machine_handles = [
-            plt.Rectangle((0, 0), 1, 1, color=machine_cmap(i % machine_cmap.N), edgecolor="black")
+            plt.Rectangle((0, 0), 1, 1, color=machine_cmap(i), edgecolor="gray")
             for i in range(n_machines)
         ]
-        ax.legend(
+        leg1 = ax.legend(
             machine_handles,
             [f"Machine {i}" for i in range(n_machines)],
             loc="center left",
             bbox_to_anchor=(1, 0.7),
             title="Machines",
             fontsize=8,
-            title_fontsize=9
         )
+        ax.add_artist(leg1)
 
     # 2. Truck legend
     if n_trucks > 0:
         truck_handles = [
-            plt.Rectangle((0, 0), 1, 1, color=truck_cmap(i % truck_cmap.N),
-                          edgecolor="black", alpha=0.7, hatch="//")
+            plt.Rectangle((0, 0), 1, 1, color=truck_cmap(i),
+                          edgecolor="gray", alpha=1, hatch="//")
             for i in range(n_trucks)
         ]
-        ax.legend(
+        leg2 = ax.legend(
             truck_handles,
             [f"Truck {i}" for i in range(n_trucks)],
             loc="center left",
             bbox_to_anchor=(1, 0.3),
             title="Trucks",
             fontsize=8,
-            title_fontsize=9
         )
+        ax.add_artist(leg2)
 
     # 3. Operation type legend
-    machine_patch = plt.Rectangle((0, 0), 1, 1, color='gray', alpha=0.9, edgecolor="black")
-    transport_patch = plt.Rectangle((0, 0), 1, 1, color='gray', alpha=0.7, edgecolor="black", hatch="//")
-    ax.legend(
+    machine_patch = plt.Rectangle((0, 0), 1, 1, edgecolor="gray", facecolor="white")
+    transport_patch = plt.Rectangle((0, 0), 1, 1, edgecolor="gray", facecolor="white", hatch="//")
+    leg3 = ax.legend(
         [machine_patch, transport_patch],
         ["Processing", "Transport"],
         loc="upper right",
-        fontsize=9
+        fontsize=8
     )
+    ax.add_artist(leg3)
 
     plt.tight_layout()
-    return ax
+    return ax, trucks_schedule

@@ -107,7 +107,7 @@ class FJSPTInitEmbedding(JSSPInitEmbedding):
         return ma_ma_edge_emb
 
     def _init_truck_edge_embed(self, td):
-        truck_loc = td["trucks_location"]  # (bs, n_trucks)
+        truck_loc = td["truck_location"]  # (bs, n_trucks)
         trucks_times = td["trucks_times"]  # (bs, n_mas+1, n_mas+1)
         truck_loc_exp = truck_loc.unsqueeze(-1).expand(-1, -1, trucks_times.size(-1))
         truck_to_all = torch.gather(

@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from einops import einsum
 from torch import Tensor
 
-from rl4co.models.nn.env_embeddings import env_init_embedding
+from init import env_init_embedding
 from rl4co.models.nn.ops import TransformerFFN
 
 
@@ -163,8 +163,8 @@ class HetGNNBlock(nn.Module):
         ma_msg_ops = self.ma_from_ops(
             ma_emb,
             ops_emb,
-            machine_edge_emb,
-            ops_ma_edges,
+            machine_edge_emb.transpose(1, 2),
+            ops_ma_edges.transpose(1, 2),
         )
 
         # machines <- machines (transport)
@@ -190,8 +190,8 @@ class HetGNNBlock(nn.Module):
         ops_msg = self.ops_from_ma(
             ops_emb,
             ma_emb,
-            machine_edge_emb.transpose(1, 2),
-            ops_ma_edges.transpose(1, 2),
+            machine_edge_emb,
+            ops_ma_edges,
         )
         ops_hidden = self.ffn_ops(ops_msg, ops_emb)
 

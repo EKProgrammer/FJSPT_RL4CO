@@ -7,10 +7,10 @@ from torchrl.data import Bounded, Composite, Unbounded
 from rl4co.envs.common.base import RL4COEnvBase as EnvBase
 from rl4co.utils.ops import gather_by_index, sample_n_random_actions
 
-from . import INIT_FINISH, NO_OP_ID
-from .generator import FJSPTGenerator, FJSPTFileGenerator
-from .render import render
-from .utils import calc_lower_bound, get_job_ops_mapping, op_is_ready
+from constants import INIT_FINISH, NO_OP_ID
+from generator import FJSPTGenerator, FJSPTFileGenerator
+from render import render
+from utils import calc_lower_bound, get_job_ops_mapping, op_is_ready
 
 
 class FJSPTEnv(EnvBase):
@@ -51,6 +51,7 @@ class FJSPTEnv(EnvBase):
     def num_jobs(self):
         return self._num_jobs
 
+    @property
     def num_trucks(self):
         return self._num_trucks
 
@@ -130,26 +131,27 @@ class FJSPTEnv(EnvBase):
 
         td_reset = td_reset.update(
             {
-                "truck_operation": torch.zeros((*batch_size,)),
-                "machine_start_times": torch.zeros((*batch_size, n_ops_max)),
-                "machine_finish_times": torch.full((*batch_size, n_ops_max), INIT_FINISH),
-                "truck_start_times": torch.zeros((*batch_size, self.num_trucks)),
-                "truck_finish_times": torch.full((*batch_size, self.num_trucks), INIT_FINISH),
-                "ma_assignment":  torch.zeros((*batch_size, self.num_mas, n_ops_max)),
-                "machine_busy_until": torch.zeros((*batch_size, self.num_mas)),
-                "truck_busy_until": torch.zeros((*batch_size, self.num_trucks)),
+                "truck_operation": torch.zeros((*batch_size,), dtype=torch.int32),
+                "machine_start_times": torch.zeros((*batch_size, n_ops_max), dtype=torch.float32),
+                "machine_finish_times": torch.full((*batch_size, n_ops_max), INIT_FINISH, dtype=torch.float32),
+                "truck_start_times": torch.zeros((*batch_size, n_ops_max), dtype=torch.float32),
+                "truck_finish_times": torch.full((*batch_size, n_ops_max), INIT_FINISH, dtype=torch.float32),
+                "ma_assignment":  torch.zeros((*batch_size, self.num_mas, n_ops_max), dtype=torch.int32),
+                "machine_busy_until": torch.zeros((*batch_size, self.num_mas), dtype=torch.float32),
+                "truck_busy_until": torch.zeros((*batch_size, self.num_trucks), dtype=torch.float32),
                 "num_eligible_mas": num_eligible_mas,
                 "next_op": start_op_per_job.clone().to(torch.int64),
                 "ops_ma_adj": ops_ma_adj,
                 "op_scheduled": torch.full((*batch_size, n_ops_max), False),
                 "job_in_process": torch.full((*batch_size, self.num_jobs), False),
                 "truck_in_process": torch.full((*batch_size, self.num_trucks), False),
+                "job_location": torch.zeros((*batch_size, self.num_jobs), dtype=torch.long),
                 # LU - 0 - начальная позиция trucks
-                "truck_location": torch.zeros((*batch_size, self.num_trucks)),
-                "job_tr_ops": torch.full((*batch_size, self.n_ops_max), INIT_FINISH),
-                "truck_tr_ops": torch.full((*batch_size, self.n_ops_max), INIT_FINISH),
+                "truck_location": torch.zeros((*batch_size, self.num_trucks), dtype=torch.long),
+                "job_tr_ops": torch.full((*batch_size, self.n_ops_max), NO_OP_ID),
+                "truck_tr_ops": torch.full((*batch_size, self.n_ops_max), NO_OP_ID),
                 "reward": torch.zeros((*batch_size,), dtype=torch.float32),
-                "time": torch.zeros((*batch_size,)),
+                "time": torch.zeros((*batch_size,), dtype=torch.float32),
                 "job_done": torch.full((*batch_size, self.num_jobs), False),
                 "done": torch.full((*batch_size, 1), False),
             },
@@ -351,9 +353,11 @@ class FJSPTEnv(EnvBase):
         # Обновляем TRUCK STATE
         truck_op = td["truck_operation"]  # индекс транспортной операции
         td["truck_operation"] += 1
+        td["job_tr_ops"][batch_idx, truck_op] = selected_job
+        td["truck_tr_ops"][batch_idx, truck_op] = selected_truck
 
-        td["truck_start_times"][batch_idx, selected_truck] = truck_ready_to_pick
-        td["truck_finish_times"][batch_idx, selected_truck] = arrival_at_machine
+        td["truck_start_times"][batch_idx, truck_op] = truck_ready_to_pick
+        td["truck_finish_times"][batch_idx, truck_op] = arrival_at_machine
         td["truck_busy_until"][batch_idx, selected_truck] = arrival_at_machine
         td["truck_in_process"][batch_idx, selected_truck] = True
 
@@ -403,6 +407,9 @@ class FJSPTEnv(EnvBase):
         min_truck = truck_free_time.min(1).values
         available_time = torch.minimum(min_ma, min_truck)
 
+        print("available_time:", available_time)
+        print("step_complete:", step_complete)
+        print("problematic:", available_time[step_complete])
         assert not torch.any(available_time[step_complete].isinf())
         td["time"] = torch.where(step_complete, available_time, td["time"])
 
@@ -464,12 +471,12 @@ class FJSPTEnv(EnvBase):
                 dtype=torch.int64,
             ),
             truck_start_times=Unbounded(
-                shape=(self.num_trucks,),
-                dtype=torch.bool,
+                shape=(self.n_ops_max,),
+                dtype=torch.int64,
             ),
             truck_finish_times=Unbounded(
-                shape=(self.num_trucks,),
-                dtype=torch.bool,
+                shape=(self.n_ops_max,),
+                dtype=torch.int64,
             ),
             job_ops_adj=Unbounded(
                 shape=(self.num_jobs, self.n_ops_max),

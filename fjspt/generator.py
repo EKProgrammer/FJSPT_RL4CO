@@ -8,7 +8,7 @@ from tensordict.tensordict import TensorDict
 from rl4co.envs.common.utils import Generator
 from rl4co.utils.pylogger import get_pylogger
 
-from .parser import get_max_ops_from_files, read, file2lines
+from parser import get_max_ops_from_files, read, file2lines
 
 log = get_pylogger(__name__)
 
@@ -99,16 +99,24 @@ class FJSPTGenerator(Generator):
         return proc_times
 
     def _simulate_trucks_times(self, batch_size) -> torch.Tensor:
-        trucks_times = torch.randint(
-            self.min_transportation_time,
-            # соблюдаем неравенство треугольника !!!
-            min(2 * self.min_transportation_time - 1, self.max_transportation_time),
-            size=(batch_size, self.num_mas + 1, self.num_mas + 1),
-            # Всего: LU + self.num_mas
-        )
-        # обнуление диагонали для батча матриц
-        mask = ~torch.eye(self.num_mas + 1, dtype=torch.bool, device=trucks_times.device)
-        trucks_times = trucks_times * mask
+        n_nodes = self.num_mas + 1  # LU + машины
+
+        # (bs, n_nodes, 2) — координаты
+        coords = torch.rand(*batch_size, n_nodes, 2)
+
+        # Евклидовы расстояния
+        dist = torch.cdist(coords, coords, p=2)
+
+        # Масштабируем в нужный диапазон
+        dist = dist / dist.max()  # нормализация [0,1]
+        dist = dist * (self.max_transportation_time - self.min_transportation_time)
+
+        trucks_times = dist + self.min_transportation_time
+        trucks_times = trucks_times.round()
+
+        # диагональ = 0
+        trucks_times.diagonal(dim1=-2, dim2=-1).zero_()
+
         return trucks_times
 
     def _generate(self, batch_size) -> TensorDict:

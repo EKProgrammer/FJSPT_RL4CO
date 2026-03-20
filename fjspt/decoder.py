@@ -9,7 +9,7 @@ from tensordict import TensorDict
 from torch import Tensor
 
 from rl4co.models.common.constructive.autoregressive import AutoregressiveDecoder
-from rl4co.models.nn.graph.hgnn import HetGNNEncoder
+from hgnn import HetGNNEncoder
 from rl4co.models.nn.mlp import MLP
 from rl4co.utils.ops import batchify, gather_by_index
 
@@ -39,7 +39,7 @@ class L2DActor(nn.Module, metaclass=abc.ABCMeta):
 
     def pre_decoder_hook(
         self, td: TensorDict, env=None, hidden: Any = None, num_starts: int = 0
-    ) -> Tuple[TensorDict, Any]:
+    ):
         """By default, we only require the input for the actor to be a tuple
         (in JSSP we only have operation embeddings but in FJSP we have operation
         and machine embeddings. By expecting a tuple we can generalize things.)
@@ -150,6 +150,7 @@ class L2DDecoder(AutoregressiveDecoder):
     # feature extractor + actor
     def __init__(
         self,
+        env_name: str = "fjspt",
         feature_extractor: nn.Module = None,
         actor: nn.Module = None,
         init_embedding: nn.Module = None,
@@ -163,11 +164,9 @@ class L2DDecoder(AutoregressiveDecoder):
     ):
         super(L2DDecoder, self).__init__()
 
-        self.env_name = "fjspt"
-
         if feature_extractor is None and stepwise:
             feature_extractor = HetGNNEncoder(
-                env_name=self.env_name,
+                env_name=env_name,
                 embed_dim=embed_dim,
                 num_layers=num_encoder_layers,
                 normalization=normalization,
