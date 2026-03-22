@@ -11,6 +11,20 @@ from rl4co.utils.pylogger import get_pylogger
 log = get_pylogger(__name__)
 
 
+def check_overlaps(ops):
+    overlaps = []
+
+    for i in range(len(ops)):
+        for j in range(i + 1, len(ops)):
+            a = ops[i]
+            b = ops[j]
+
+            if a["end"] > b["start"] and b["end"] > a["start"]:
+                overlaps.append((a, b))
+
+    return overlaps
+
+
 def render(td: TensorDict, idx: int):
     inst = td[idx]
 
@@ -29,8 +43,8 @@ def render(td: TensorDict, idx: int):
     for val in ma_assign:
         machine = val[0].item()
         op = val[1].item()
-        machine_start = inst["machine_start_times"][val[1]]
-        machine_end = inst["machine_finish_times"][val[1]]
+        machine_start = inst["machine_start_times"][val[1]].item()
+        machine_end = inst["machine_finish_times"][val[1]].item()
         machine_schedule[machine].append((op, machine_start, machine_end))
 
     # n_ops_max = числу производственных операций
@@ -40,14 +54,14 @@ def render(td: TensorDict, idx: int):
     job_tr_ops = inst["job_tr_ops"]  # (n_ops_max,) номер job
     truck_tr_ops = inst["truck_tr_ops"]  # (n_ops_max,) номер truck
     trucks_schedule = defaultdict(list)
-    for op in range(1, inst["truck_operation"] + 1):
+    for op in range(inst["truck_operation"]):
         job = job_tr_ops[op].item()
         truck = truck_tr_ops[op].item()
-        truck_start = truck_start_times[op]
-        truck_end = truck_finish_times[op]
+        truck_start = truck_start_times[op].item()
+        truck_end = truck_finish_times[op].item()
         trucks_schedule[truck].append((job, truck_start, truck_end))
 
-    _, ax = plt.subplots(figsize=(15, 10))
+    fig, ax = plt.subplots(figsize=(15, 10))
 
     # Plot horizontal bars for each processing task
     for ma, ops in machine_schedule.items():
@@ -58,7 +72,7 @@ def render(td: TensorDict, idx: int):
                 end - start,
                 left=start,
                 height=0.6,
-                color=machine_cmap(ma),
+                facecolor=machine_cmap(ma),
                 edgecolor="gray",
                 linewidth=1,
             )
@@ -72,7 +86,7 @@ def render(td: TensorDict, idx: int):
                 end - start,
                 left=start,
                 height=0.6,
-                color=truck_cmap(tr),
+                facecolor=truck_cmap(tr),
                 edgecolor="gray",
                 hatch="//",
                 linewidth=1,
@@ -88,46 +102,88 @@ def render(td: TensorDict, idx: int):
     # 1. Machine legend
     if n_machines > 0:
         machine_handles = [
-            plt.Rectangle((0, 0), 1, 1, color=machine_cmap(i), edgecolor="gray")
+            plt.Rectangle((0, 0), 1, 1, facecolor=machine_cmap(i), edgecolor="gray")
             for i in range(n_machines)
         ]
-        leg1 = ax.legend(
+        fig.legend(
             machine_handles,
             [f"Machine {i}" for i in range(n_machines)],
             loc="center left",
-            bbox_to_anchor=(1, 0.7),
+            bbox_to_anchor=(0.9, 0.8),
             title="Machines",
-            fontsize=8,
+            fontsize=9,
         )
-        ax.add_artist(leg1)
 
     # 2. Truck legend
     if n_trucks > 0:
         truck_handles = [
-            plt.Rectangle((0, 0), 1, 1, color=truck_cmap(i),
+            plt.Rectangle((0, 0), 1, 1, facecolor=truck_cmap(i),
                           edgecolor="gray", alpha=1, hatch="//")
             for i in range(n_trucks)
         ]
-        leg2 = ax.legend(
+        fig.legend(
             truck_handles,
             [f"Truck {i}" for i in range(n_trucks)],
             loc="center left",
-            bbox_to_anchor=(1, 0.3),
+            bbox_to_anchor=(0.9, 0.5),
             title="Trucks",
-            fontsize=8,
+            fontsize=9,
         )
-        ax.add_artist(leg2)
 
     # 3. Operation type legend
     machine_patch = plt.Rectangle((0, 0), 1, 1, edgecolor="gray", facecolor="white")
     transport_patch = plt.Rectangle((0, 0), 1, 1, edgecolor="gray", facecolor="white", hatch="//")
-    leg3 = ax.legend(
+    fig.legend(
         [machine_patch, transport_patch],
         ["Processing", "Transport"],
-        loc="upper right",
-        fontsize=8
+        loc="center left",
+        bbox_to_anchor=(0.9, 0.2),
+        title="Rectangle type",
+        fontsize=9
     )
-    ax.add_artist(leg3)
 
-    plt.tight_layout()
-    return ax, trucks_schedule
+    # -----------------------------
+    ops_debug = []
+    for ma, ops in machine_schedule.items():
+        for op, start, end in ops:
+            job = inst["job_ops_adj"][:, op].nonzero().item()
+            ops_debug.append({
+                "type": "machine",
+                "machine": ma,
+                "job": job,
+                "op": op,
+                "start": start,
+                "end": end,
+            })
+    for tr, ops in trucks_schedule.items():
+        for job, start, end in ops:
+            ops_debug.append({
+                "type": "transport",
+                "truck": tr,
+                "job": job,
+                "start": start,
+                "end": end,
+            })
+
+    machine_conflicts = {}
+    for ma, ops in machine_schedule.items():
+        sorted_ops = sorted(ops, key=lambda x: x[1])
+        machine_conflicts[ma] = check_overlaps([
+            {"start": s, "end": e, "op": op} for op, s, e in sorted_ops
+        ])
+
+    truck_conflicts = {}
+    for tr, ops in trucks_schedule.items():
+        sorted_ops = sorted(ops, key=lambda x: x[1])
+        truck_conflicts[tr] = check_overlaps([
+            {"start": s, "end": e} for _, s, e in sorted_ops
+        ])
+
+    job_ops = defaultdict(list)
+    for op in ops_debug:
+        job_ops[op["job"]].append(op)
+    job_conflicts = {}
+    for job, ops in job_ops.items():
+        job_conflicts[job] = check_overlaps(ops)
+
+    return ax, machine_schedule, trucks_schedule, ops_debug, machine_conflicts, truck_conflicts, job_conflicts
