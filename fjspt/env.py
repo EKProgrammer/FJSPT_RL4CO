@@ -140,6 +140,7 @@ class FJSPTEnv(EnvBase):
                 "machine_busy_until": torch.zeros((*batch_size, self.num_mas), dtype=torch.float32),
                 "truck_busy_until": torch.zeros((*batch_size, self.num_trucks), dtype=torch.float32),
                 "num_eligible_mas": num_eligible_mas,
+                # (bs, num_jobs)
                 "next_op": start_op_per_job.clone().to(torch.int64),
                 "ops_ma_adj": ops_ma_adj,
                 "op_scheduled": torch.full((*batch_size, n_ops_max), False),
@@ -209,13 +210,14 @@ class FJSPTEnv(EnvBase):
 
         # расширяем размерности
         job_mask = job_mask.unsqueeze(2).unsqueeze(3)          # (bs, j, 1, 1)
-        truck_mask = truck_mask.unsqueeze(1).unsqueeze(3)      # (bs, 1, t, 1)
-        machine_mask = machine_mask.unsqueeze(1).unsqueeze(2)  # (bs, 1, 1, m)
-        eligible_mask = eligible_mask.unsqueeze(2)             # (bs, j, 1, m)
+        machine_mask = machine_mask.unsqueeze(1).unsqueeze(3)  # (bs, 1, m, 1)
+        truck_mask = truck_mask.unsqueeze(1).unsqueeze(2)      # (bs, 1, 1, t)
+        eligible_mask = eligible_mask.unsqueeze(3)             # (bs, j, m, 1)
 
         # объединяем
-        full_mask = job_mask | truck_mask | machine_mask | eligible_mask  # (bs, j, t, m)
-        flat_mask = rearrange(full_mask, "bs j t m -> bs (j t m)")
+        full_mask = job_mask | truck_mask | machine_mask | eligible_mask  # (bs, j, m, t)
+
+        flat_mask = rearrange(full_mask, "bs j m t -> bs (j m t)")
 
         if self.mask_no_ops:
             no_op_mask = td["done"]
