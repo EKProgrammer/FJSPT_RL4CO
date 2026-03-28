@@ -359,6 +359,7 @@ class FJSPTEnv(EnvBase):
 
         td["machine_start_times"][batch_idx, machine_op] = proc_start
         td["machine_finish_times"][batch_idx, machine_op] = proc_end
+        print('td["machine_finish_times"][batch_idx, machine_op] =', batch_idx, machine_op, proc_end)
         td["ma_assignment"][batch_idx, selected_machine, machine_op] = 1
 
         td["machine_busy_until"][batch_idx, selected_machine] = proc_end

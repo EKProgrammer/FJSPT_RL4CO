@@ -187,6 +187,28 @@ def spatial_encoding(td: TensorDict):
     return num_jumps
 
 
+def tensor_max_info(name, t):
+    flat_idx = t.argmax()
+    max_val = t.flatten()[flat_idx]
+    coords = torch.unravel_index(flat_idx, t.shape)
+    return f"{name}: max={max_val.item()}, coords={tuple(c.item() for c in coords)}"
+
+
+def tensor_nan_info(name, t):
+    nan_mask = torch.isnan(t)
+    inf_mask = torch.isinf(t)
+
+    res = []
+    if nan_mask.any():
+        idx = nan_mask.nonzero()[0]
+        res.append(f"{name}: NaN at {tuple(idx.tolist())}")
+    if inf_mask.any():
+        idx = inf_mask.nonzero()[0]
+        res.append(f"{name}: INF at {tuple(idx.tolist())}")
+
+    return "\n".join(res) if res else f"{name}: OK"
+
+
 def calc_lower_bound(td: TensorDict):
     """Here we calculate the lower bound of the operations finish times. In the FJSP case, multiple things need to
     be taken into account due to the usability of the different machines for multiple ops of different jobs:
@@ -206,15 +228,20 @@ def calc_lower_bound(td: TensorDict):
     """
 
     proc_times = td["proc_times"].clone()  # (bs, ma, ops)
-    machine_busy_until = td["machine_busy_until"]  # (bs, ma)
-    ops_adj = td["ops_adj"]  # (bs, ops, ops, 2)
-    machine_finish_times = td["machine_finish_times"]  # (bs, ops)
+    machine_busy_until = td["machine_busy_until"].to(torch.float32)  # (bs, ma)
+    ops_adj = td["ops_adj"].to(torch.float32)  # (bs, ops, ops, 2)
+    machine_finish_times = td["machine_finish_times"].to(torch.float32)   # (bs, ops)
     job_ops_adj = td["job_ops_adj"]  # (bs, jobs, ops)
     op_scheduled = td["op_scheduled"].to(torch.float32)  # (bs, ops)
 
     ############## REGARDING POINT 1 OF DOCSTRING ##############
     # for operations whose immidiate predecessor is scheduled, we can determine its earliest
     # start time by the end time of the predecessor.
+    NUM_INF = 1e6
+    machine_finish_times = torch.nan_to_num(
+        machine_finish_times,
+        posinf=NUM_INF
+    ) # защита от 0 * inf = nan !!!
     # (bs, num_ops, 1)
     maybe_start_at = torch.bmm(ops_adj[..., 0], machine_finish_times[..., None]).squeeze(2)
     # using the start_time, we can determine if and how long an op needs to wait for a machine to finish
@@ -250,8 +277,52 @@ def calc_lower_bound(td: TensorDict):
     # remove nans
     LBs = torch.nan_to_num(LBs, nan=0.0)
 
+    if not torch.where(machine_finish_times != INIT_FINISH, torch.isclose(LBs, machine_finish_times), True).all():
+        torch.set_printoptions(threshold=float('inf'))
+        with open("debug.txt", "w") as f:
+            if "action" in td:
+                f.write(f"td['action'][0] = {td['action'][0]}\n")
+                action = td["action"]
+                n_m = td["machine_busy_until"].size(1)
+                n_t = td["truck_busy_until"].size(1)
+                selected_job = action // (n_m * n_t)
+                remaining = action % (n_m * n_t)
+                selected_machine = remaining // n_t
+                selected_truck = remaining % n_t
+                selected_op = td["next_op"].gather(1, selected_job[:, None]).squeeze(1)
+                f.write(f"selected_job[0] = {selected_job[0]}\n")
+                f.write(f"selected_machine[0] = {selected_machine[0]}\n")
+                f.write(f"selected_truck[0] = {selected_truck[0]}\n")
+                f.write(f"selected_op[0] = {selected_op[0]}\n")
+
+            f.write(tensor_max_info("td['time']", td['time']) + "\n")
+            f.write(tensor_nan_info("td['time']", td['time']) + "\n")
+            f.write(tensor_max_info("ops_adj", ops_adj) + "\n")
+            f.write(tensor_nan_info("ops_adj", ops_adj) + "\n")
+            f.write(f"ops_adj[0, :, :, 0] = {ops_adj[0, :, :, 0]}\n")
+            f.write(tensor_max_info("machine_finish_times", machine_finish_times) + "\n")
+            f.write(tensor_nan_info("machine_finish_times", machine_finish_times) + "\n")
+            f.write(f"machine_finish_times[0, :] = {machine_finish_times[0, :]}\n")
+            f.write(tensor_max_info("maybe_start_at", maybe_start_at) + "\n")
+            f.write(tensor_nan_info("maybe_start_at", maybe_start_at) + "\n")
+            f.write(f"maybe_start_at[0, :] = {maybe_start_at[0, :]}\n")
+            f.write(tensor_max_info("wait_for_ma_offset", wait_for_ma_offset) + "\n")
+            f.write(tensor_nan_info("wait_for_ma_offset", wait_for_ma_offset) + "\n")
+            f.write(tensor_max_info("proc_time_plus_wait", proc_time_plus_wait) + "\n")
+            f.write(tensor_nan_info("proc_time_plus_wait", proc_time_plus_wait) + "\n")
+            f.write(tensor_max_info("ops_proc_times", ops_proc_times) + "\n")
+            f.write(tensor_nan_info("ops_proc_times", ops_proc_times) + "\n")
+            f.write(tensor_max_info("machine_finish_times_1st_diff", machine_finish_times_1st_diff) + "\n")
+            f.write(tensor_nan_info("machine_finish_times_1st_diff", machine_finish_times_1st_diff) + "\n")
+            # f.write(tensor_max_info("LBs", LBs) + "\n")
+            # f.write(tensor_nan_info("LBs", LBs) + "\n")
+            f.write(f"LBs[0, :] = {LBs[0, :]}\n")
+            f.write(tensor_max_info("ops_proc_times", ops_proc_times) + "\n")
+            f.write(tensor_nan_info("ops_proc_times", ops_proc_times) + "\n")
+        torch.set_printoptions(threshold=1000)
+
     # test
-    assert torch.where(machine_finish_times != INIT_FINISH, torch.isclose(LBs, machine_finish_times), True).all()
+    assert torch.where(machine_finish_times != NUM_INF, torch.isclose(LBs, machine_finish_times), True).all()
 
     return LBs
 

@@ -56,7 +56,7 @@ class FIFO(nn.Module):
         selected_machine = flat_indices % n_mas
 
         # td["truck_busy_until"].shape = (bs, num_trucks)
-        truck_busy_until = td["truck_busy_until"].masked_fill(td["truck_in_process"], float("inf"))
+        truck_busy_until = td["truck_busy_until"].masked_fill(td["truck_in_process"], INIT_FINISH)
         selected_truck = torch.argmin(truck_busy_until, dim=-1)  # (bs,)
 
         mask = td["action_mask"]
@@ -90,11 +90,11 @@ class MOPNR(nn.Module):
         op = td["next_op"][batch_idx, selected_job]  # (bs,)
         proc_time = td["proc_times"][batch_idx, :, op]  # (bs, n_mas)
         valid_machines = td["ops_ma_adj"][batch_idx, :, op]  # (bs, n_mas)
-        proc_time[valid_machines == 0] = float("inf")
+        proc_time[valid_machines == 0] = INIT_FINISH
         selected_machine = torch.argmin(proc_time, dim=-1)
 
         # td["truck_busy_until"].shape = (bs, num_trucks)
-        truck_busy_until = td["truck_busy_until"].masked_fill(td["truck_in_process"], float("inf"))
+        truck_busy_until = td["truck_busy_until"].masked_fill(td["truck_in_process"], INIT_FINISH)
         selected_truck = torch.argmin(truck_busy_until, dim=-1)  # (bs,)
 
         mask = td["action_mask"]
@@ -117,7 +117,7 @@ class SPT(nn.Module):
         # td["next_op"].shape = (bs, num_jobs) - номер следующей операции для каждой job
         next_op_expanded = td["next_op"].unsqueeze(1).expand(-1, n_mas, -1)
         proc_times = td["proc_times"].clone()  # (bs, n_mas, n_ops)
-        proc_times[proc_times == 0] = float("inf")
+        proc_times[proc_times == 0] = INIT_FINISH
 
         # Получаем времена обработки следующей операции
         next_op_times = torch.gather(
@@ -132,7 +132,7 @@ class SPT(nn.Module):
         selected_job = flat_indices // n_mas
         selected_machine = flat_indices % n_mas
 
-        truck_busy_until = td["truck_busy_until"].masked_fill(td["truck_in_process"], float("inf"))
+        truck_busy_until = td["truck_busy_until"].masked_fill(td["truck_in_process"], INIT_FINISH)
         selected_truck = torch.argmin(truck_busy_until, dim=-1)  # (bs,)
 
         mask = td["action_mask"]
@@ -159,17 +159,17 @@ class MWKR(nn.Module):
         remaining_mask = job_ops_adj * (~op_scheduled.unsqueeze(1))
         remaining_work = (remaining_mask * min_proc_time.unsqueeze(1)).sum(dim=-1)
         invalid_jobs = td["job_done"] | td["job_in_process"]
-        remaining_work = remaining_work.masked_fill(invalid_jobs, -float("inf"))
+        remaining_work = remaining_work.masked_fill(invalid_jobs, -INIT_FINISH)
         selected_job = remaining_work.argmax(dim=-1)
 
         batch_idx = torch.arange(batch_size, device=td.device)
         op = td["next_op"][batch_idx, selected_job]
         proc_time = td["proc_times"][batch_idx, :, op]
         valid_machines = td["ops_ma_adj"][batch_idx, :, op]
-        proc_time[valid_machines == 0] = float("inf")
+        proc_time[valid_machines == 0] = INIT_FINISH
         selected_machine = torch.argmin(proc_time, dim=-1)
 
-        truck_busy_until = td["truck_busy_until"].masked_fill(td["truck_in_process"], float("inf"))
+        truck_busy_until = td["truck_busy_until"].masked_fill(td["truck_in_process"], INIT_FINISH)
         selected_truck = torch.argmin(truck_busy_until, dim=-1)  # (bs,)
 
         mask = td["action_mask"]
