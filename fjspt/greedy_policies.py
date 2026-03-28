@@ -32,7 +32,7 @@ class FIFO(nn.Module):
         n_trs = td["truck_location"].size(1)
 
         # td["ops_ma_adj"] - (bs, num_mas, num_ops)
-        # permuted_ops_ma_adj.shape = (bs, ops, num_mas)
+        # permuted_ops_ma_adj.shape = (bs, num_ops, num_mas)
         permuted_ops_ma_adj = td["ops_ma_adj"].permute(0, 2, 1)
         # для каждой работы - маска валидных машин для следующей производственной операции
         # valid_machines_mask.shape = (bs, num_jobs, num_mas)
@@ -56,7 +56,8 @@ class FIFO(nn.Module):
         selected_machine = flat_indices % n_mas
 
         # td["truck_busy_until"].shape = (bs, num_trucks)
-        selected_truck = torch.argmin(td["truck_busy_until"], dim=-1)
+        truck_busy_until = td["truck_busy_until"].masked_fill(td["truck_in_process"], float("inf"))
+        selected_truck = torch.argmin(truck_busy_until, dim=-1)  # (bs,)
 
         mask = td["action_mask"]
         logits = torch.zeros((batch_size, 1 + n_jobs * n_mas * n_trs))
@@ -80,6 +81,9 @@ class MOPNR(nn.Module):
         op_scheduled_exp = op_scheduled.unsqueeze(1)  # (bs, 1, n_ops)
         remaining_mask = job_ops_adj * (~op_scheduled_exp)  # (bs, n_jobs, n_ops)
         remaining_ops = remaining_mask.sum(dim=-1)  # (bs, n_jobs)
+
+        # Исключаем те job из remaining_ops, у которых текущая операция не закончилась
+        remaining_ops = remaining_ops.masked_fill(td["job_in_process"], -1e9)
         selected_job = remaining_ops.argmax(dim=-1)  # (bs,)
 
         batch_idx = torch.arange(batch_size, device=td.device)
@@ -90,7 +94,8 @@ class MOPNR(nn.Module):
         selected_machine = torch.argmin(proc_time, dim=-1)
 
         # td["truck_busy_until"].shape = (bs, num_trucks)
-        selected_truck = torch.argmin(td["truck_busy_until"], dim=-1)
+        truck_busy_until = td["truck_busy_until"].masked_fill(td["truck_in_process"], float("inf"))
+        selected_truck = torch.argmin(truck_busy_until, dim=-1)  # (bs,)
 
         mask = td["action_mask"]
         logits = torch.zeros((batch_size, 1 + n_jobs * n_mas * n_trs))
@@ -111,7 +116,7 @@ class SPT(nn.Module):
 
         # td["next_op"].shape = (bs, num_jobs) - номер следующей операции для каждой job
         next_op_expanded = td["next_op"].unsqueeze(1).expand(-1, n_mas, -1)
-        proc_times = td["proc_times"]  # (bs, n_mas, n_ops)
+        proc_times = td["proc_times"].clone()  # (bs, n_mas, n_ops)
         proc_times[proc_times == 0] = float("inf")
 
         # Получаем времена обработки следующей операции
@@ -127,7 +132,8 @@ class SPT(nn.Module):
         selected_job = flat_indices // n_mas
         selected_machine = flat_indices % n_mas
 
-        selected_truck = torch.argmin(td["truck_busy_until"], dim=-1)  # (bs,)
+        truck_busy_until = td["truck_busy_until"].masked_fill(td["truck_in_process"], float("inf"))
+        selected_truck = torch.argmin(truck_busy_until, dim=-1)  # (bs,)
 
         mask = td["action_mask"]
         action_idx = 1 + selected_job * n_mas * n_trs + selected_machine * n_trs + selected_truck
@@ -152,7 +158,8 @@ class MWKR(nn.Module):
         min_proc_time, _ = proc_times.min(dim=1)  # (bs, n_ops)
         remaining_mask = job_ops_adj * (~op_scheduled.unsqueeze(1))
         remaining_work = (remaining_mask * min_proc_time.unsqueeze(1)).sum(dim=-1)
-        remaining_work[td["job_done"]] = -float("inf")
+        invalid_jobs = td["job_done"] | td["job_in_process"]
+        remaining_work = remaining_work.masked_fill(invalid_jobs, -float("inf"))
         selected_job = remaining_work.argmax(dim=-1)
 
         batch_idx = torch.arange(batch_size, device=td.device)
@@ -162,7 +169,8 @@ class MWKR(nn.Module):
         proc_time[valid_machines == 0] = float("inf")
         selected_machine = torch.argmin(proc_time, dim=-1)
 
-        selected_truck = torch.argmin(td["truck_busy_until"], dim=-1)  # (bs,)
+        truck_busy_until = td["truck_busy_until"].masked_fill(td["truck_in_process"], float("inf"))
+        selected_truck = torch.argmin(truck_busy_until, dim=-1)  # (bs,)
 
         mask = td["action_mask"]
         action_idx = 1 + selected_job * n_mas * n_trs + selected_machine * n_trs + selected_truck

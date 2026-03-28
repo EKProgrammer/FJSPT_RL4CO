@@ -27,7 +27,8 @@ class FJSPTEnv(EnvBase):
     ):
         super().__init__(check_solution=False, **kwargs)
         if generator is None:
-            if generator_params.get("file_path", None) is not None:
+            if generator_params.get("proc_file_path", None) is not None and \
+                    generator_params.get("trucks_file_path", None) is not None:
                 generator = FJSPTFileGenerator(**generator_params)
             else:
                 # генерируем случайные инстансы
@@ -240,10 +241,10 @@ class FJSPTEnv(EnvBase):
         n_t = self.num_trucks
 
         # Извлекаем индексы (обратный порядок умножения)
-        selected_machine = action % n_m
-        remaining = action // n_m
+        selected_job = action // (n_m * n_t)
+        remaining = action % (n_m * n_t)
+        selected_machine = remaining // n_t
         selected_truck = remaining % n_t
-        selected_job = remaining // n_t
 
         selected_op = td["next_op"].gather(1, selected_job[:, None]).squeeze(1)
         return selected_job, selected_op, selected_truck, selected_machine
@@ -293,7 +294,6 @@ class FJSPTEnv(EnvBase):
 
         return td
 
-    # МОДИФИЦИРОВАТЬ
     def _get_features(self, td):
         # ИСПОЛЬЗУЕТСЯ для фичей в init.py в JSSPInitEmbedding
         # after we have transitioned to a next time step, we determine which operations are ready
@@ -319,6 +319,13 @@ class FJSPTEnv(EnvBase):
 
         # 3*(#req_op)
         selected_job, machine_op, selected_truck, selected_machine = self._translate_action(td)
+        # print("env action")
+        # print("time =", td["time"])
+        # print("selected_job =", selected_job)
+        # print("machine_op =", machine_op)
+        # print("selected_truck =", selected_truck)
+        # print("selected_machine =", selected_machine)
+        # print("action_mask =", td["action_mask"])
 
         # 1. Считаем время транспортировки
         # Откуда забираем деталь
@@ -328,11 +335,11 @@ class FJSPTEnv(EnvBase):
 
         # Время доехать пустым до детали + довезти деталь до станка
         dist_empty = td["trucks_times"][batch_idx, truck_loc, job_loc]
-        dist_loaded = td["trucks_times"][batch_idx, job_loc, selected_machine]
+        dist_loaded = td["trucks_times"][batch_idx, job_loc, selected_machine + 1]
 
         truck_ready_to_pick = torch.maximum(
             # Деталь можно забрать, когда она готова (закончена прошлая операция)
-            td["machine_busy_until"][batch_idx, job_loc],
+            td["machine_busy_until"][batch_idx, job_loc - 1],
             # Грузовик может начать движение только когда он свободен
             td["truck_busy_until"][batch_idx, selected_truck]
         )
@@ -371,8 +378,8 @@ class FJSPTEnv(EnvBase):
         td["truck_tr_ops"][batch_idx, truck_op] = selected_truck
 
         # Обновляем локации для следующих шагов
-        td["job_location"][batch_idx, selected_job] = selected_machine
-        td["truck_location"][batch_idx, selected_truck] = selected_machine
+        td["job_location"][batch_idx, selected_job] = selected_machine + 1
+        td["truck_location"][batch_idx, selected_truck] = selected_machine + 1
 
         # mapping transport -> production
         td["tr_op_to_op"][batch_idx, truck_op] = machine_op
@@ -439,12 +446,22 @@ class FJSPTEnv(EnvBase):
         td["time"] = torch.where(step_complete, available_time, td["time"])
 
         curr_ops_end = td["machine_finish_times"].gather(1, td["next_op"])
+        # print("curr_ops_end =", curr_ops_end)
+        # print("td['time'] =", td["time"])
         op_finished = td["job_in_process"] & (curr_ops_end <= td["time"][:, None])
+        # print("op_finished =", op_finished)
 
         job_finished = op_finished & (td["next_op"] == td["end_op_per_job"])
+        # print("td['next_op'] =", td["next_op"])
+        # print("td['end_op_per_job'] =", td["end_op_per_job"])
+        # print('td["next_op"] == td["end_op_per_job"] =', td["next_op"] == td["end_op_per_job"])
+        # print("job_finished =", job_finished)
 
         td["next_op"] = torch.where(op_finished & ~job_finished, td["next_op"] + 1, td["next_op"])
         td["job_in_process"][op_finished] = False
+
+        truck_finished = td["truck_in_process"] & (td["truck_busy_until"] <= td["time"][:, None])
+        td["truck_in_process"][truck_finished] = False
 
         td["job_done"] = td["job_done"] + job_finished
         td["done"] = td["job_done"].all(1, keepdim=True)
@@ -481,11 +498,11 @@ class FJSPTEnv(EnvBase):
             ),
             start_op_per_job=Unbounded(
                 shape=(self.num_jobs,),
-                dtype=torch.bool,
+                dtype=torch.int64,
             ),
             end_op_per_job=Unbounded(
                 shape=(self.num_jobs,),
-                dtype=torch.bool,
+                dtype=torch.int64,
             ),
             machine_start_times=Unbounded(
                 shape=(self.n_ops_max,),

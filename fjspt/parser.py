@@ -55,7 +55,7 @@ def get_max_ops_from_files(files):
     return max(map(get_n_ops_of_instance, files))
 
 
-def read(proc_locs: Path, max_ops=None):
+def read(proc_locs: Path, ma_indexing: int = 1, max_ops=None):
     """
     Reads an FJSPLIB instance.
 
@@ -81,8 +81,8 @@ def read(proc_locs: Path, max_ops=None):
     max_ops = max_ops or total_ops
     max_ops_per_job = int(n_ope_per_job.max())
 
-    end_op_per_job = n_ope_per_job.cumsum(1) - 1
-    start_op_per_job = torch.cat((torch.zeros((1, 1)), end_op_per_job[:, :-1] + 1), dim=1)
+    end_op_per_job = (n_ope_per_job.cumsum(1) - 1).to(torch.int64)
+    start_op_per_job = torch.cat((torch.zeros((1, 1)), end_op_per_job[:, :-1] + 1), dim=1).to(torch.int64)
 
     pad_mask = torch.arange(max_ops)
     pad_mask = pad_mask.ge(total_ops).unsqueeze(0)
@@ -93,7 +93,7 @@ def read(proc_locs: Path, max_ops=None):
         for op in job:
             for ma, dur in op:
                 # subtract one to let indices start from zero
-                proc_times[ma - 1, op_cnt] = dur
+                proc_times[ma - ma_indexing, op_cnt] = dur
             op_cnt += 1
     proc_times = proc_times.unsqueeze(0)
 

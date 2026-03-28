@@ -59,7 +59,7 @@ def render(td: TensorDict, idx: int):
         truck = truck_tr_ops[op].item()
         truck_start = truck_start_times[op].item()
         truck_end = truck_finish_times[op].item()
-        trucks_schedule[truck].append((job, truck_start, truck_end))
+        trucks_schedule[truck].append((op, job, truck_start, truck_end))
 
     fig, ax = plt.subplots(figsize=(15, 10))
 
@@ -80,7 +80,7 @@ def render(td: TensorDict, idx: int):
 
     # Plot horizontal bars for each transportation task
     for tr, ops in trucks_schedule.items():
-        for job, start, end in ops:
+        for op, job, start, end in ops:
             ax.barh(
                 job,
                 end - start,
@@ -91,7 +91,7 @@ def render(td: TensorDict, idx: int):
                 hatch="//",
                 linewidth=1,
             )
-            ax.text(start + (end - start) / 2, job, tr, ha="center", va="center", color="black")
+            ax.text(start + (end - start) / 2, job, op, ha="center", va="center", color="black")
 
     # Set labels and title
     ax.set_yticks(range(n_jobs))
@@ -156,10 +156,11 @@ def render(td: TensorDict, idx: int):
                 "end": end,
             })
     for tr, ops in trucks_schedule.items():
-        for job, start, end in ops:
+        for op, job, start, end in ops:
             ops_debug.append({
                 "type": "transport",
                 "truck": tr,
+                "op": op,
                 "job": job,
                 "start": start,
                 "end": end,
@@ -176,7 +177,7 @@ def render(td: TensorDict, idx: int):
     for tr, ops in trucks_schedule.items():
         sorted_ops = sorted(ops, key=lambda x: x[1])
         truck_conflicts[tr] = check_overlaps([
-            {"start": s, "end": e} for _, s, e in sorted_ops
+            {"start": s, "end": e} for _, _, s, e in sorted_ops
         ])
 
     job_ops = defaultdict(list)

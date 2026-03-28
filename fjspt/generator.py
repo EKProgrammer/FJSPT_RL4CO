@@ -9,6 +9,7 @@ from rl4co.envs.common.utils import Generator
 from rl4co.utils.pylogger import get_pylogger
 
 from parser import get_max_ops_from_files, read, file2lines
+from pathlib import Path
 
 log = get_pylogger(__name__)
 
@@ -180,28 +181,33 @@ class FJSPTFileGenerator(Generator):
     """Data generator for the Flexible Job-Shop Scheduling Problem with Transportation resources (FJSPT)
     using instance files"""
 
-    def __init__(self, proc_file_path: str, trucks_file_path: str, **unused_kwargs):
+    def __init__(self, proc_file_path: Path, trucks_file_path: Path, ma_indexing: int, **unused_kwargs):
         self.proc_files = self.list_files(proc_file_path)
         self.num_samples = len(self.proc_files)
 
         if len(unused_kwargs) > 0:
             log.error(f"Found {len(unused_kwargs)} unused kwargs: {unused_kwargs}")
 
-        if len(self.proc_files) > 1:
-            n_ops_max = get_max_ops_from_files(self.proc_files)
+        n_ops_max = get_max_ops_from_files(self.proc_files)
 
-        ret = map(partial(read, max_ops=n_ops_max), self.proc_files)
+        ret = map(partial(read, max_ops=n_ops_max, ma_indexing=ma_indexing), self.proc_files)
 
         td_list, num_jobs, num_machines, num_trucks, max_ops_per_job = list(zip(*list(ret)))
-        # предполагается ОДИНАКОВОЕ число операций, доступных машинин и времён обработки
+        # предполагается ОДИНАКОВОЕ число работ, доступных машинин и времён обработки
         num_jobs, num_machines, num_trucks = map(lambda x: x[0], (num_jobs, num_machines, num_trucks))
         max_ops_per_job = max(max_ops_per_job)
 
-        trucks_times = torch.tensor(file2lines(trucks_file_path))
+        if len(list(trucks_file_path.iterdir())) == 1:
+            trucks_file = list(trucks_file_path.iterdir())[0]
+        else:
+            trucks_file = trucks_file_path / f"trucks_layout{num_machines}.txt"
+        trucks_times = torch.tensor(file2lines(trucks_file))
         assert trucks_times.ndim == 2 and trucks_times.size(0) == trucks_times.size(1)
-        # !!! есть датасеты с матрицей для большего числа станков - обрезаем матрицу
-        trucks_times = trucks_times[:num_machines + 1, :num_machines + 1]
-        td_list["trucks_times"] = [trucks_times for _ in range(self.num_samples)]
+        # есть датасеты с матрицей для большего числа станков - обрезаем матрицу
+        trucks_times = trucks_times[:num_machines + 1, :num_machines + 1].unsqueeze(0)
+        td_list = list(td_list)
+        for td in td_list:
+            td["trucks_times"] = trucks_times
 
         self.td = torch.cat(td_list, dim=0)
         self.num_mas = num_machines
@@ -209,7 +215,6 @@ class FJSPTFileGenerator(Generator):
         self.num_trucks = num_trucks
         self.max_ops_per_job = max_ops_per_job
         self.n_ops_max = max_ops_per_job * num_jobs
-
         self.start_idx = 0
 
     def _generate(self, batch_size: list[int]) -> TensorDict:
@@ -232,6 +237,11 @@ class FJSPTFileGenerator(Generator):
         ко всем «настоящим» файлам и проверяет, чтобы список не оказался пустым.
         """
         import os
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Path does not exist: {path}")
+
+        if os.path.isfile(path):
+            return [path]
 
         files = [
             os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))

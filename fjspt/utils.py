@@ -203,8 +203,6 @@ def calc_lower_bound(td: TensorDict):
     UNSCHEDULED operations, to obtain the lower bound.
     Making this work is a bit hacky: We compute the first differences of finishing times of those operations scheduled and
     add them to the matrix of processing times, where already processed operations are masked (with zero)
-
-
     """
 
     proc_times = td["proc_times"].clone()  # (bs, ma, ops)
