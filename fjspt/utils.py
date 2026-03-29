@@ -237,7 +237,7 @@ def calc_lower_bound(td: TensorDict):
     ############## REGARDING POINT 1 OF DOCSTRING ##############
     # for operations whose immidiate predecessor is scheduled, we can determine its earliest
     # start time by the end time of the predecessor.
-    NUM_INF = 1e6
+    NUM_INF = 50000.0
     machine_finish_times = torch.nan_to_num(
         machine_finish_times,
         posinf=NUM_INF
@@ -295,30 +295,48 @@ def calc_lower_bound(td: TensorDict):
                 f.write(f"selected_truck[0] = {selected_truck[0]}\n")
                 f.write(f"selected_op[0] = {selected_op[0]}\n")
 
-            f.write(tensor_max_info("td['time']", td['time']) + "\n")
-            f.write(tensor_nan_info("td['time']", td['time']) + "\n")
-            f.write(tensor_max_info("ops_adj", ops_adj) + "\n")
-            f.write(tensor_nan_info("ops_adj", ops_adj) + "\n")
-            f.write(f"ops_adj[0, :, :, 0] = {ops_adj[0, :, :, 0]}\n")
-            f.write(tensor_max_info("machine_finish_times", machine_finish_times) + "\n")
-            f.write(tensor_nan_info("machine_finish_times", machine_finish_times) + "\n")
+                i = selected_op[0]
+
+                row = ops_adj[0, i, :, 0]
+                times = machine_finish_times[0]
+
+                # индексы, где есть связь предшественника
+                idx = row.nonzero(as_tuple=True)[0]
+
+                print("selected_op =", i.item())
+                print("predecessor indices =", idx)
+
+                print("row[idx] =", row[idx])
+                print("times[idx] =", times[idx])
+                print("products =", row[idx] * times[idx])
+                print("sum =", (row * times).sum())
+
+                f.write(f"ops_adj[0, selected_op[0], :, 0] = {ops_adj[0, selected_op[0], :, 0]}\n")
+
+            # f.write(tensor_max_info("td['time']", td['time']) + "\n")
+            # f.write(tensor_nan_info("td['time']", td['time']) + "\n")
+            # f.write(tensor_max_info("ops_adj", ops_adj) + "\n")
+            # f.write(tensor_nan_info("ops_adj", ops_adj) + "\n")
+            # f.write(f"ops_adj[0, :, :, 0] = {ops_adj[0, :, :, 0]}\n")
+            # f.write(tensor_max_info("machine_finish_times", machine_finish_times) + "\n")
+            # f.write(tensor_nan_info("machine_finish_times", machine_finish_times) + "\n")
             f.write(f"machine_finish_times[0, :] = {machine_finish_times[0, :]}\n")
-            f.write(tensor_max_info("maybe_start_at", maybe_start_at) + "\n")
-            f.write(tensor_nan_info("maybe_start_at", maybe_start_at) + "\n")
+            # f.write(tensor_max_info("maybe_start_at", maybe_start_at) + "\n")
+            # f.write(tensor_nan_info("maybe_start_at", maybe_start_at) + "\n")
             f.write(f"maybe_start_at[0, :] = {maybe_start_at[0, :]}\n")
-            f.write(tensor_max_info("wait_for_ma_offset", wait_for_ma_offset) + "\n")
-            f.write(tensor_nan_info("wait_for_ma_offset", wait_for_ma_offset) + "\n")
-            f.write(tensor_max_info("proc_time_plus_wait", proc_time_plus_wait) + "\n")
-            f.write(tensor_nan_info("proc_time_plus_wait", proc_time_plus_wait) + "\n")
-            f.write(tensor_max_info("ops_proc_times", ops_proc_times) + "\n")
-            f.write(tensor_nan_info("ops_proc_times", ops_proc_times) + "\n")
-            f.write(tensor_max_info("machine_finish_times_1st_diff", machine_finish_times_1st_diff) + "\n")
-            f.write(tensor_nan_info("machine_finish_times_1st_diff", machine_finish_times_1st_diff) + "\n")
+            # f.write(tensor_max_info("wait_for_ma_offset", wait_for_ma_offset) + "\n")
+            # f.write(tensor_nan_info("wait_for_ma_offset", wait_for_ma_offset) + "\n")
+            # f.write(tensor_max_info("proc_time_plus_wait", proc_time_plus_wait) + "\n")
+            # f.write(tensor_nan_info("proc_time_plus_wait", proc_time_plus_wait) + "\n")
+            # f.write(tensor_max_info("ops_proc_times", ops_proc_times) + "\n")
+            # f.write(tensor_nan_info("ops_proc_times", ops_proc_times) + "\n")
+            # f.write(tensor_max_info("machine_finish_times_1st_diff", machine_finish_times_1st_diff) + "\n")
+            # f.write(tensor_nan_info("machine_finish_times_1st_diff", machine_finish_times_1st_diff) + "\n")
             # f.write(tensor_max_info("LBs", LBs) + "\n")
             # f.write(tensor_nan_info("LBs", LBs) + "\n")
             f.write(f"LBs[0, :] = {LBs[0, :]}\n")
-            f.write(tensor_max_info("ops_proc_times", ops_proc_times) + "\n")
-            f.write(tensor_nan_info("ops_proc_times", ops_proc_times) + "\n")
+            # f.write(tensor_max_info("ops_proc_times", ops_proc_times) + "\n")
+            # f.write(tensor_nan_info("ops_proc_times", ops_proc_times) + "\n")
         torch.set_printoptions(threshold=1000)
 
     # test
