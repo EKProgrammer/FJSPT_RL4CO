@@ -10,7 +10,6 @@ from rl4co.models.common.constructive.autoregressive import (
     AutoregressivePolicy,
 )
 from rl4co.models.nn.mlp import MLP
-from rl4co.models.common.constructive.base import NoEncoder
 
 from rl4co.utils.pylogger import get_pylogger
 from rl4co.utils.decoding import DecodingStrategy, process_logits
@@ -134,14 +133,16 @@ class L2DPolicy4PPO(L2DPolicy):
         logits, mask = self.decoder.actor(td, *hidden)
         # get logprobs and entropy over logp distribution
         logprobs = process_logits(logits, mask, tanh_clipping=self.tanh_clipping)
+        print("evaluate: logprobs =", logprobs)
         action_logprobs = gather_by_index(logprobs, td["action"], dim=1)
         dist_entropys = Categorical(logprobs.exp()).entropy()
 
         return action_logprobs, value_pred, dist_entropys
 
-    def act(self, td, phase: str = "train"):
+    def act(self, td, env, phase: str = "train"):
         logits, mask = self.decoder(td, hidden=None, num_starts=0)  # !!!!!!!!!!!!
         logprobs = process_logits(logits, mask, tanh_clipping=self.tanh_clipping)
+        print("act: logprobs =", logprobs)
 
         # DRL-S, sampling actions following \pi
         if phase == "train":
